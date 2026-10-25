@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 export type EventName =
   | "segment.added"
   | "evidence.added"
+  | "fact.added"
   | "assumption.updated"
   | "meeting.updated"
   | "meeting.ended"
@@ -13,6 +14,7 @@ export type EventName =
 const NAMES: EventName[] = [
   "segment.added",
   "evidence.added",
+  "fact.added",
   "assumption.updated",
   "meeting.updated",
   "meeting.ended",

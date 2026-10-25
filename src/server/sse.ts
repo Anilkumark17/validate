@@ -1,6 +1,7 @@
 export type SseEventName =
   | "segment.added"
   | "evidence.added"
+  | "fact.added"
   | "assumption.updated"
   | "meeting.updated"
   | "meeting.ended"

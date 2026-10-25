@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db, schema } from "./db";
 import { env } from "./env";
-import { describeImage, analyzeSegments } from "./llm/tasks";
+import { describeImage, analyzeSegments, extractFacts } from "./llm/tasks";
 import { queue } from "./queue";
 import { publish } from "./sse";
 import { computeStatus } from "./status";
@@ -171,6 +171,38 @@ async function processBatch(meetingId: string, projectId: string, batch: (typeof
     .set({ processed: true })
     .where(inArray(segment.id, batch.map((s) => s.id)));
   await recomputeAssumptions(projectId, [...touched], meetingId);
+  await storeFacts(meetingId, projectId, batch);
+}
+
+/** Customer behavior and language as testable facts. Failures here never block evidence. */
+async function storeFacts(meetingId: string, projectId: string, batch: (typeof segment.$inferSelect)[]) {
+  try {
+    const facts = await extractFacts({
+      meetingId,
+      segments: batch.map((s) => ({ idx: s.idx, speaker: s.speaker, text: s.text })),
+    });
+    if (facts.length === 0) return;
+    const byIdx = new Map(batch.map((s) => [s.idx, s]));
+    const rows = await db()
+      .insert(schema.fact)
+      .values(
+        facts.map((f) => ({
+          projectId,
+          meetingId,
+          segmentId: byIdx.get(f.segmentIdx)!.id,
+          kind: f.kind,
+          statement: f.statement,
+          quote: f.quote || null,
+          speaker: byIdx.get(f.segmentIdx)!.speaker,
+          phrases: f.phrases,
+          outboundTest: f.outboundTest || null,
+        })),
+      )
+      .returning();
+    publish(projectId, "fact.added", { meetingId, count: rows.length });
+  } catch (e) {
+    console.error("[pipeline] facts failed", e instanceof Error ? e.message : e);
+  }
 }
 
 export async function recomputeAssumptions(projectId: string, assumptionIds: string[], meetingId: string | null) {

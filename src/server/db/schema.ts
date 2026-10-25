@@ -36,6 +36,8 @@ export const project = pgTable("project", {
   targetUser: text("target_user"),
   persona: jsonb("persona"),
   personaUpdatedAt: timestamp("persona_updated_at", { withTimezone: true }),
+  voice: jsonb("voice"),
+  voiceUpdatedAt: timestamp("voice_updated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -50,6 +52,8 @@ export const assumption = pgTable(
     owner: text("owner"),
     status: assumptionStatus("status").notNull().default("untested"),
     confidence: real("confidence").notNull().default(0),
+    /** Idea mapper extras: category, origin, evidence level, falsifiedIf, leapOfFaith, test plan. */
+    meta: jsonb("meta"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -125,6 +129,29 @@ export const link = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("link_evidence_assumption_uq").on(t.evidenceId, t.assumptionId), index("link_assumption_idx").on(t.assumptionId)],
+);
+
+export const factKind = pgEnum("fact_kind", ["behavior", "pain", "goal", "language", "constraint", "tone"]);
+
+/** Observed customer behavior and language, stored as testable facts for outbound. */
+export const fact = pgTable(
+  "fact",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    meetingId: uuid("meeting_id").notNull().references(() => meeting.id, { onDelete: "cascade" }),
+    segmentId: uuid("segment_id").references(() => segment.id, { onDelete: "set null" }),
+    kind: factKind("kind").notNull(),
+    statement: text("statement").notNull(),
+    quote: text("quote"),
+    speaker: text("speaker"),
+    /** Customer's own words worth reusing in copy. */
+    phrases: text("phrases").array().notNull().default([]),
+    /** Cheap outbound test for this fact (message, offer, or question). */
+    outboundTest: text("outbound_test"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("fact_project_idx").on(t.projectId)],
 );
 
 export const statusEvent = pgTable(

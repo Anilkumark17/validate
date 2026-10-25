@@ -9,6 +9,7 @@ const g = globalThis as unknown as {
   __keyIdx?: number;
   __jsonMode?: boolean;
   __thinkingOk?: boolean;
+  __noThinkModels?: Set<string>;
 };
 
 function nextClient(): GoogleGenAI {
@@ -40,6 +41,8 @@ export interface GenerateOptions {
   thinking?: boolean;
   /** Ask a thinking-capable model to think as little as possible (latency sensitive calls). */
   minimalThinking?: boolean;
+  /** Per request timeout. Defaults to 30 seconds. */
+  timeoutMs?: number;
   meetingId?: string | null;
 }
 
@@ -77,7 +80,7 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
     const useJson = g.__jsonMode !== false;
     const useThinking = !!opts.thinking && g.__thinkingOk !== false;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30_000);
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
     try {
       const res = await client.models.generateContent({
         model: opts.model,
@@ -88,7 +91,7 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
           ...(useJson ? { responseMimeType: "application/json" } : {}),
           ...(useThinking
             ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } }
-            : opts.minimalThinking
+            : opts.minimalThinking && !g.__noThinkModels?.has(opts.model)
               ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
               : {}),
         },
@@ -110,9 +113,10 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
         attempt--;
         continue;
       }
-      if (status === 400 && useThinking && /think/i.test(msg)) {
-        g.__thinkingOk = false;
-        console.warn("[llm] thinkingConfig unsupported, disabling");
+      if (status === 400 && /think/i.test(msg) && (useThinking || opts.minimalThinking)) {
+        if (useThinking) g.__thinkingOk = false;
+        else (g.__noThinkModels ??= new Set()).add(opts.model);
+        console.warn(`[llm] thinking level unsupported for ${opts.model}, disabling`);
         attempt--;
         continue;
       }

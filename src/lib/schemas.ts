@@ -19,6 +19,7 @@ export const assumptionInput = z.object({
   type: z.enum(ASSUMPTION_TYPES),
   risk: z.number().int().min(1).max(5).default(3),
   owner: z.string().trim().max(120).optional().nullable(),
+  meta: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 export const assumptionPatch = assumptionInput.partial();
 
