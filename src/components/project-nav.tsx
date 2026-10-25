@@ -14,6 +14,8 @@ export function ProjectHeader({ projectId, children }: { projectId: string; chil
     { href: `/p/${projectId}/meetings`, label: "Meetings" },
     { href: `/p/${projectId}/matrix`, label: "Matrix" },
     { href: `/p/${projectId}/persona`, label: "Persona" },
+    { href: `/p/${projectId}/voice`, label: "Facts and voice" },
+    { href: `/p/${projectId}/ideate`, label: "Map an idea" },
   ];
   return (
     <>

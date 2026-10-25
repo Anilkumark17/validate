@@ -3,7 +3,8 @@ import "@livekit/components-styles";
 import { LiveKitRoom, RoomAudioRenderer, VideoConference, useConnectionState, useLocalParticipant, useTracks } from "@livekit/components-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConnectionState, Track } from "livekit-client";
-import { ChevronDown, Copy, Loader2, MicOff, PhoneOff } from "lucide-react";
+import { ChevronDown, Copy, Loader2, MicOff, PhoneOff, Wand2 } from "lucide-react";
+import { MapResults, type IdeaMapResult } from "@/components/idea-map-results";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -225,6 +226,12 @@ function SidePanel({ detail, pipeline, pipelineMsg, meetingId, projectId }: { de
   const linksByEv = new Map<string, LinkRow[]>();
   detail.links.forEach((l) => linksByEv.set(l.evidenceId, [...(linksByEv.get(l.evidenceId) ?? []), l]));
   const reprocess = useMutation({ mutationFn: () => api(`/meetings/${meetingId}/reprocess`, { method: "POST" }) });
+  const qc = useQueryClient();
+  const [suggested, setSuggested] = useState<IdeaMapResult | null>(null);
+  const suggest = useMutation({
+    mutationFn: () => api<IdeaMapResult>(`/projects/${projectId}/assumptions/map`, { method: "POST", json: { fromCalls: true, stage: "idea" } }),
+    onSuccess: setSuggested,
+  });
 
   return (
     <aside className="flex min-h-0 flex-col border-l bg-card">
@@ -276,6 +283,24 @@ function SidePanel({ detail, pipeline, pipelineMsg, meetingId, projectId }: { de
           ))}
         </TabsContent>
         <TabsContent value="assumptions" className="space-y-2 p-3">
+          <Button size="sm" variant="secondary" className="w-full" disabled={suggest.isPending} onClick={() => suggest.mutate()}>
+            <Wand2 /> {suggest.isPending ? "Reading the conversation…" : "Suggest new assumptions from this call"}
+          </Button>
+          {suggest.error && <p className="text-xs text-destructive" role="alert">{suggest.error.message}</p>}
+          {suggested && (
+            <div className="rounded-lg border bg-background p-2">
+              <MapResults
+                key={suggested.testSequence.join()}
+                projectId={projectId}
+                compact
+                result={{ ...suggested, assumptions: suggested.assumptions.filter((a) => a.risk >= 3).slice(0, 8) }}
+                onSaved={() => {
+                  setSuggested(null);
+                  qc.invalidateQueries({ queryKey: ["meeting", meetingId] });
+                }}
+              />
+            </div>
+          )}
           {detail.assumptions.map((a: Assumption) => (
             <div key={a.id} className="rounded-lg border bg-background p-2.5 text-sm">
               <p className="leading-snug">{a.statement}</p>

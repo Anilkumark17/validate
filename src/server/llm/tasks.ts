@@ -50,7 +50,7 @@ export async function analyzeSegments(args: {
 }): Promise<AnalyzedItem[]> {
   const raw = await generateJson(
     {
-      model: env().GEMMA_MODEL_JUDGE,
+      model: env().GEMMA_MODEL_JUDGE, fallbackModel: env().GEMMA_MODEL_FAST,
       system: ANALYZE_SYSTEM,
       parts: [{ text: analyzePrompt(args) }],
       thinking: true,
@@ -157,7 +157,7 @@ export async function buildPersona(args: {
   items: { speaker: string | null; claim: string; quote: string | null; stance: string; assumption: string }[];
 }): Promise<Persona> {
   const out = await generateJson(
-    { model: env().GEMMA_MODEL_JUDGE, system: PERSONA_SYSTEM, parts: [{ text: personaPrompt(args) }], thinking: true },
+    { model: env().GEMMA_MODEL_JUDGE, fallbackModel: env().GEMMA_MODEL_FAST, system: PERSONA_SYSTEM, parts: [{ text: personaPrompt(args) }], thinking: true },
     personaZ,
   );
   const known = args.items.map((i) => i.quote).filter((q): q is string => !!q).map(norm);
@@ -208,7 +208,7 @@ export async function mapIdea(args: {
 }): Promise<IdeaMap> {
   return generateJson(
     {
-      model: env().GEMMA_MODEL_JUDGE,
+      model: env().GEMMA_MODEL_JUDGE, fallbackModel: env().GEMMA_MODEL_FAST,
       system: IDEA_MAP_SYSTEM,
       parts: [{ text: ideaMapPrompt(args) }],
       timeoutMs: 150_000,
@@ -281,7 +281,7 @@ export async function buildVoice(args: {
   facts: { id: string; kind: string; statement: string; quote: string | null; phrases: string[]; speaker: string | null }[];
 }): Promise<Voice> {
   const out = await generateJson(
-    { model: env().GEMMA_MODEL_JUDGE, system: VOICE_SYSTEM, parts: [{ text: voicePrompt(args) }], timeoutMs: 120_000 },
+    { model: env().GEMMA_MODEL_JUDGE, fallbackModel: env().GEMMA_MODEL_FAST, system: VOICE_SYSTEM, parts: [{ text: voicePrompt(args) }], timeoutMs: 120_000 },
     voiceZ,
   );
   const corpus = norm(args.facts.map((f) => `${f.quote ?? ""} ${f.phrases.join(" ")}`).join(" "));

@@ -41,6 +41,8 @@ export interface GenerateOptions {
   thinking?: boolean;
   /** Ask a thinking-capable model to think as little as possible (latency sensitive calls). */
   minimalThinking?: boolean;
+  /** Model to use when the primary keeps failing (for example a 5xx from the hosted 31B). */
+  fallbackModel?: string;
   /** Per request timeout. Defaults to 30 seconds. */
   timeoutMs?: number;
   meetingId?: string | null;
@@ -72,7 +74,18 @@ export interface GenerateResult {
   outputTokens: number;
 }
 
+/** Tries opts.model, then opts.fallbackModel once if the first model keeps failing. */
 export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
+  try {
+    return await generateOnce(opts);
+  } catch (e) {
+    if (!opts.fallbackModel || opts.fallbackModel === opts.model) throw e;
+    console.warn(`[llm] ${opts.model} failed, falling back to ${opts.fallbackModel}`);
+    return generateOnce({ ...opts, model: opts.fallbackModel, thinking: false, fallbackModel: undefined });
+  }
+}
+
+async function generateOnce(opts: GenerateOptions): Promise<GenerateResult> {
   const maxAttempts = 4;
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
