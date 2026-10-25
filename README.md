@@ -190,7 +190,7 @@ Honest list of what is deliberately out of scope for the current stage.
 - **No authentication or authorization.** Anyone with a project URL can read and write it. Invite codes gate meeting join only. Add auth and per-project ownership before any real use.
 - **Single instance only.** SSE hub, queue, and batch timers are in memory.
 - **Uploads on local disk** (`UPLOAD_DIR`) served through `/api/uploads/:name`. Move to object storage for multi-instance or serverless.
-- **No rate limiting** on transcribe and frame endpoints.
+- **Rate limiting is basic.** `rateLimit` in `src/server/http.ts` guards transcribe, frames, and segments, but it is per process and in memory.
 - **Thresholds are untuned.** `STATUS_THRESHOLDS` should be calibrated on real interviews.
 - **Limited test coverage.** Only `computeStatus` is unit tested. Pipeline and LLM task guards are good candidates next.
 - **Scale-out path:** Postgres-backed job table or a broker, LISTEN/NOTIFY or Redis pub/sub for events, S3-compatible storage, auth, and per-key quota tracking.
