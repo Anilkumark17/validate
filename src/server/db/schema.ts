@@ -29,8 +29,17 @@ export const linkOrigin = pgEnum("link_origin", ["model", "user"]);
 export const jobStatus = pgEnum("job_status", ["queued", "processing", "done", "failed"]);
 export const meetingState = pgEnum("meeting_state", ["scheduled", "live", "ended"]);
 
+export const appUser = pgTable("app_user", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const project = pgTable("project", {
   id: uuid("id").primaryKey().defaultRandom(),
+  ownerId: uuid("owner_id").references(() => appUser.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
   targetUser: text("target_user"),

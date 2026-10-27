@@ -1,15 +1,16 @@
 "use client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, FileText, Link2, Radio } from "lucide-react";
+import { Check, Copy, FileText, Radio } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageState } from "@/components/app-shell";
-import { ImportDialog, NewMeetingDialog } from "@/components/meeting-dialogs";
+import { NewMeetingDialog } from "@/components/meeting-dialogs";
 import { ProjectHeader } from "@/components/project-nav";
 import { Button } from "@/components/ui/button";
 import { api, type Meeting } from "@/lib/api";
+import { RequireAuth } from "@/lib/auth";
 import { useProjectEvents } from "@/lib/use-project-events";
 
 const STATE_STYLE = {
@@ -37,25 +38,32 @@ function CopyInvite({ code }: { code: string }) {
 }
 
 export default function MeetingsPage() {
+  return (
+    <RequireAuth>
+      <Meetings />
+    </RequireAuth>
+  );
+}
+
+function Meetings() {
   const { projectId } = useParams<{ projectId: string }>();
   const qc = useQueryClient();
   const key = ["meetings", projectId];
   const { data, isLoading, error } = useQuery({ queryKey: key, queryFn: () => api<Meeting[]>(`/projects/${projectId}/meetings`) });
   useProjectEvents(projectId, (ev) => {
-    if (ev === "meeting.updated" || ev === "meeting.ended" || ev === "pipeline.state") qc.invalidateQueries({ queryKey: key });
+    if (ev === "meeting.updated" || ev === "meeting.ended") qc.invalidateQueries({ queryKey: key });
   });
 
   return (
     <>
       <ProjectHeader projectId={projectId}>
-        <ImportDialog projectId={projectId} />
         <NewMeetingDialog projectId={projectId} />
         <NewMeetingDialog projectId={projectId} goLive />
       </ProjectHeader>
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
         <h1 className="text-xl font-semibold">Meetings</h1>
-        <p className="mb-6 text-sm text-muted-foreground">Schedule interviews, share an invite link, and review what each one proved.</p>
-        <PageState loading={isLoading} error={error?.message} empty={data?.length === 0} emptyText="No meetings yet. Schedule one or import a transcript." />
+        <p className="mb-6 text-sm text-muted-foreground">Create a meeting, share the invite link, and watch the live transcript.</p>
+        <PageState loading={isLoading} error={error?.message} empty={data?.length === 0} emptyText="No meetings yet. Create one to start." />
         <ul className="space-y-3">
           {data?.map((m) => (
             <li key={m.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
@@ -65,12 +73,10 @@ export default function MeetingsPage() {
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATE_STYLE[m.state]}`}>
                     {m.state === "live" ? "● Live" : m.state[0]!.toUpperCase() + m.state.slice(1)}
                   </span>
-                  {m.source === "transcript_upload" && <span className="rounded-full bg-muted px-2 py-0.5 text-xs">Imported</span>}
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {m.scheduledFor ? `Scheduled ${new Date(m.scheduledFor).toLocaleString()}` : m.heldAt ? `Held ${m.heldAt}` : "Not scheduled"}
                   {m.participants.length ? ` · ${m.participants.join(", ")}` : ""}
-                  {m.jobStatus === "failed" ? " · analysis failed" : m.jobStatus === "processing" ? " · analyzing…" : ""}
                 </p>
               </div>
               {m.state !== "ended" && <CopyInvite code={m.inviteCode} />}
@@ -83,12 +89,11 @@ export default function MeetingsPage() {
               )}
               {m.state === "ended" && (
                 <Button size="sm" variant="outline" asChild>
-                  <Link href={`/m/${m.id}/review`}>
-                    <FileText /> Review
+                  <Link href={`/m/${m.id}/call`}>
+                    <FileText /> Transcript
                   </Link>
                 </Button>
               )}
-              <Link2 className="hidden" aria-hidden />
             </li>
           ))}
         </ul>

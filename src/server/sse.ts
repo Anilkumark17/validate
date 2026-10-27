@@ -1,12 +1,4 @@
-export type SseEventName =
-  | "segment.added"
-  | "evidence.added"
-  | "fact.added"
-  | "assumption.updated"
-  | "meeting.updated"
-  | "meeting.ended"
-  | "pipeline.state"
-  | "pipeline.error";
+export type SseEventName = "meeting.updated" | "meeting.ended";
 
 type Sink = (chunk: string) => void;
 const g = globalThis as unknown as { __sse?: Map<string, Set<Sink>> };

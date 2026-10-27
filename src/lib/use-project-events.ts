@@ -1,26 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export type EventName =
-  | "segment.added"
-  | "evidence.added"
-  | "fact.added"
-  | "assumption.updated"
-  | "meeting.updated"
-  | "meeting.ended"
-  | "pipeline.state"
-  | "pipeline.error";
+export type EventName = "meeting.updated" | "meeting.ended";
 
-const NAMES: EventName[] = [
-  "segment.added",
-  "evidence.added",
-  "fact.added",
-  "assumption.updated",
-  "meeting.updated",
-  "meeting.ended",
-  "pipeline.state",
-  "pipeline.error",
-];
+const NAMES: EventName[] = ["meeting.updated", "meeting.ended"];
 
 /** Subscribes to the project SSE stream. Handler receives parsed payloads. */
 export function useProjectEvents(

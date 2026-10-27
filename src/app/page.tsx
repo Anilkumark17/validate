@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/form";
 import { api, type Project } from "@/lib/api";
-import { STATUS_META, STATUS_ORDER } from "@/lib/status-meta";
+import { RequireAuth } from "@/lib/auth";
 
 function NewProjectDialog() {
   const [open, setOpen] = useState(false);
@@ -22,7 +22,7 @@ function NewProjectDialog() {
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["projects"] });
       setOpen(false);
-      router.push(`/p/${p.id}/assumptions/new`);
+      router.push(`/p/${p.id}/meetings`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -33,7 +33,7 @@ function NewProjectDialog() {
           <Plus /> New project
         </Button>
       </DialogTrigger>
-      <DialogContent title="New project" description="A project holds assumptions and every interview that tests them.">
+      <DialogContent title="New project" description="A project holds your meetings.">
         <form
           className="space-y-4"
           onSubmit={(e) => {
@@ -70,6 +70,14 @@ function NewProjectDialog() {
 }
 
 export default function Home() {
+  return (
+    <RequireAuth>
+      <Projects />
+    </RequireAuth>
+  );
+}
+
+function Projects() {
   const { data, isLoading, error } = useQuery({ queryKey: ["projects"], queryFn: () => api<Project[]>("/projects") });
   return (
     <>
@@ -79,12 +87,11 @@ export default function Home() {
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <div className="mb-6">
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-sm text-muted-foreground">Declare assumptions, interview customers, and see what the evidence says.</p>
+          <p className="text-sm text-muted-foreground">Create a project, start a meeting, and get a live transcript.</p>
         </div>
         <PageState loading={isLoading} error={error?.message} empty={data?.length === 0} emptyText="No projects yet. Create one to start." />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.map((p) => {
-            const total = STATUS_ORDER.reduce((n, s) => n + (p.statusCounts?.[s] ?? 0), 0);
             return (
               <Link
                 key={p.id}
@@ -97,21 +104,6 @@ export default function Home() {
                     <h2 className="truncate font-medium">{p.name}</h2>
                     <p className="line-clamp-2 text-sm text-muted-foreground">{p.targetUser || p.description || "No description"}</p>
                   </div>
-                </div>
-                <div className="mt-4 flex h-2 overflow-hidden rounded-full bg-muted" aria-hidden>
-                  {STATUS_ORDER.map((s) => {
-                    const n = p.statusCounts?.[s] ?? 0;
-                    return n ? <span key={s} className={STATUS_META[s].dot} style={{ width: `${(n / total) * 100}%` }} /> : null;
-                  })}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {STATUS_ORDER.filter((s) => p.statusCounts?.[s]).map((s) => (
-                    <span key={s} className="inline-flex items-center gap-1">
-                      <span className={`size-2 rounded-full ${STATUS_META[s].dot}`} />
-                      {p.statusCounts![s]} {STATUS_META[s].label.toLowerCase()}
-                    </span>
-                  ))}
-                  {total === 0 && <span>No assumptions yet</span>}
                 </div>
                 <div className="mt-3 flex items-center gap-1 text-xs text-muted-foreground">
                   <Video className="size-3" aria-hidden /> {p.meetingCount ?? 0} meeting{p.meetingCount === 1 ? "" : "s"}

@@ -22,6 +22,7 @@ export default function JoinPage() {
   const { code } = useParams<{ code: string }>();
   const router = useRouter();
   const [name, setName] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
   const { data, isLoading, error } = useQuery({ queryKey: ["invite", code], queryFn: () => api<Invite>(`/meetings/by-code/${code}`), retry: false });
   useEffect(() => {
     try {
@@ -44,20 +45,27 @@ export default function JoinPage() {
             ) : (
               <form
                 className="mt-5 space-y-4"
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
+                  setJoinError(null);
                   try {
-                    localStorage.setItem(GUEST_NAME_KEY, name);
-                  } catch {}
-                  router.push(`/m/${data.id}/call`);
+                    await api("/livekit/token", { method: "POST", json: { inviteCode: code, name: name.trim() } });
+                    try {
+                      localStorage.setItem(GUEST_NAME_KEY, name.trim());
+                    } catch {}
+                    router.push(`/m/${data.id}/call`);
+                  } catch (err) {
+                    setJoinError((err as Error).message);
+                  }
                 }}
               >
                 <div>
                   <Label htmlFor="n">Your name</Label>
                   <Input id="n" value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} autoFocus />
                 </div>
+                {joinError && <p className="text-sm text-destructive" role="alert">{joinError}</p>}
                 <Button type="submit" className="w-full" disabled={!name.trim()}>Join meeting</Button>
-                <p className="text-xs text-muted-foreground">Your microphone is transcribed in your browser. Only the text is shared with the team.</p>
+                <p className="text-xs text-muted-foreground">Your microphone is transcribed and the text is shared with everyone in the meeting.</p>
               </form>
             )}
           </div>

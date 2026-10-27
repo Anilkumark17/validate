@@ -1,16 +1,17 @@
 import { desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { requireProject } from "@/server/auth";
 import { db, schema } from "@/server/db";
 import { handle, parseBody } from "@/server/http";
-import { createMeeting, getProject } from "@/server/queries";
+import { createMeeting } from "@/server/queries";
 import { meetingInput } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handle(async (_req: Request, ctx: Ctx) => {
+export const GET = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await getProject(id);
+  await requireProject(req, id);
   const rows = await db()
     .select()
     .from(schema.meeting)
@@ -21,7 +22,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
 
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await getProject(id);
+  await requireProject(req, id);
   const v = await parseBody(req, meetingInput);
   const m = await createMeeting(id, {
     title: v.title,

@@ -1,9 +1,13 @@
 "use client";
-import { BookMarked, Moon, Sun } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { BookMarked, LogOut, Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -19,6 +23,25 @@ export function ThemeToggle() {
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
     >
       {mounted && resolvedTheme === "dark" ? <Sun /> : <Moon />}
+    </Button>
+  );
+}
+
+export function SignOut() {
+  const { data } = useMe();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const out = useMutation({
+    mutationFn: () => api("/auth/logout", { method: "POST" }),
+    onSuccess: () => {
+      qc.clear();
+      router.replace("/login");
+    },
+  });
+  if (!data) return null;
+  return (
+    <Button variant="ghost" size="sm" onClick={() => out.mutate()} title={data.email}>
+      <LogOut /> <span className="hidden sm:inline">{data.name}</span>
     </Button>
   );
 }
@@ -42,6 +65,7 @@ export function TopBar({ children, crumbs }: { children?: React.ReactNode; crumb
         {crumbs ? <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">{crumbs}</div> : null}
         <div className="ml-auto flex items-center gap-2">
           {children}
+          <SignOut />
           <ThemeToggle />
         </div>
       </div>

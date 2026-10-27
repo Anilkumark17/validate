@@ -2,14 +2,14 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db, schema } from "@/server/db";
 import { ApiError, handle } from "@/server/http";
-import { getMeeting } from "@/server/queries";
+import { requireMeetingAccess } from "@/server/auth";
 import { publish } from "@/server/sse";
 
 export const dynamic = "force-dynamic";
 
-export const POST = handle(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
+export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const { id } = await ctx.params;
-  const m = await getMeeting(id);
+  const { meeting: m } = await requireMeetingAccess(req, id);
   if (m.state === "ended") throw new ApiError(409, "ended", "Meeting already ended");
   if (m.state === "live") return NextResponse.json({ startedAt: m.startedAt, state: m.state });
   const [row] = await db()
