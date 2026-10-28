@@ -14,8 +14,8 @@ import { RequireAuth } from "@/lib/auth";
 import { useProjectEvents } from "@/lib/use-project-events";
 
 const STATE_STYLE = {
-  scheduled: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  live: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
+  scheduled: "bg-muted text-foreground",
+  live: "bg-border text-foreground",
   ended: "bg-muted text-muted-foreground",
 } as const;
 
@@ -56,47 +56,55 @@ function Meetings() {
 
   return (
     <>
-      <ProjectHeader projectId={projectId}>
-        <NewMeetingDialog projectId={projectId} />
-        <NewMeetingDialog projectId={projectId} goLive />
-      </ProjectHeader>
-      <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-        <h1 className="text-xl font-semibold">Meetings</h1>
-        <p className="mb-6 text-sm text-muted-foreground">Create a meeting, share the invite link, and watch the live transcript.</p>
-        <PageState loading={isLoading} error={error?.message} empty={data?.length === 0} emptyText="No meetings yet. Create one to start." />
-        <ul className="space-y-3">
-          {data?.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="truncate font-medium">{m.title}</h2>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATE_STYLE[m.state]}`}>
-                    {m.state === "live" ? "● Live" : m.state[0]!.toUpperCase() + m.state.slice(1)}
-                  </span>
+      <main className="max-w-4xl">
+        <ProjectHeader projectId={projectId}>
+          <NewMeetingDialog projectId={projectId} />
+          <NewMeetingDialog projectId={projectId} goLive />
+        </ProjectHeader>
+        <PageState loading={isLoading} error={error?.message} />
+        {data?.length === 0 && (
+          <section className="rounded-lg border border-dashed bg-card px-6 py-10">
+            <h2 className="text-base font-semibold">No meetings yet</h2>
+            <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+              Start a live call to talk to a customer now, or schedule one and send the invite link. The transcript is written as people speak and feeds the evidence.
+            </p>
+          </section>
+        )}
+        {data && data.length > 0 && (
+          <ul className="divide-y divide-rule overflow-hidden rounded-lg border bg-card">
+            {data.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5">
+                <div className="min-w-0 flex-1 basis-64">
+                  <div className="flex items-center gap-2">
+                    <h2 className="truncate font-medium">{m.title}</h2>
+                    <span className={`inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium ${STATE_STYLE[m.state]}`}>
+                      {m.state === "live" && <span className="size-1.5 rounded-full bg-destructive" aria-hidden />}
+                      {m.state[0]!.toUpperCase() + m.state.slice(1)}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {m.scheduledFor ? `Scheduled ${new Date(m.scheduledFor).toLocaleString()}` : m.heldAt ? `Held ${m.heldAt}` : "Not scheduled"}
+                    {m.participants.length ? ` · ${m.participants.join(", ")}` : ""}
+                  </p>
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {m.scheduledFor ? `Scheduled ${new Date(m.scheduledFor).toLocaleString()}` : m.heldAt ? `Held ${m.heldAt}` : "Not scheduled"}
-                  {m.participants.length ? ` · ${m.participants.join(", ")}` : ""}
-                </p>
-              </div>
-              {m.state !== "ended" && <CopyInvite code={m.inviteCode} />}
-              {m.state !== "ended" && (
-                <Button size="sm" asChild>
-                  <Link href={`/m/${m.id}/call`}>
-                    <Radio /> {m.state === "live" ? "Rejoin" : "Start"}
-                  </Link>
-                </Button>
-              )}
-              {m.state === "ended" && (
-                <Button size="sm" variant="outline" asChild>
-                  <Link href={`/m/${m.id}/call`}>
-                    <FileText /> Transcript
-                  </Link>
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
+                {m.state !== "ended" && <CopyInvite code={m.inviteCode} />}
+                {m.state !== "ended" ? (
+                  <Button size="sm" asChild>
+                    <Link href={`/m/${m.id}/call`}>
+                      <Radio /> {m.state === "live" ? "Rejoin" : "Start"}
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/m/${m.id}/call`}>
+                      <FileText /> Transcript
+                    </Link>
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </main>
     </>
   );

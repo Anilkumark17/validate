@@ -1,11 +1,15 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   smallint,
   text,
@@ -14,20 +18,35 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const assumptionType = pgEnum("assumption_type", ["desirability", "feasibility", "viability"]);
-export const assumptionStatus = pgEnum("assumption_status", [
-  "untested",
-  "supporting",
-  "contradicted",
-  "mixed",
-  "validated",
-  "invalidated",
-]);
-export const evidenceStance = pgEnum("evidence_stance", ["supports", "contradicts", "neutral"]);
 export const meetingSource = pgEnum("meeting_source", ["live_call", "transcript_upload", "manual"]);
-export const linkOrigin = pgEnum("link_origin", ["model", "user"]);
 export const jobStatus = pgEnum("job_status", ["queued", "processing", "done", "failed"]);
 export const meetingState = pgEnum("meeting_state", ["scheduled", "live", "ended"]);
+
+// ---- Assumption validation board ----
+export const validationStatus = pgEnum("validation_status", [
+  "generated",
+  "ready_to_validate",
+  "validation_in_progress",
+  "evidence_collected",
+  "validated",
+  "invalidated",
+  "needs_more_evidence",
+]);
+export const generationStatus = pgEnum("generation_status", ["pending", "running", "completed", "failed"]);
+export const generationKind = pgEnum("generation_kind", ["initial", "refine"]);
+export const creationSource = pgEnum("creation_source", ["ai_generated", "user_created"]);
+export const evidenceType = pgEnum("evidence_type", [
+  "interview",
+  "survey",
+  "prototype_test",
+  "experiment",
+  "analytics",
+  "observation",
+  "secondary_research",
+]);
+export const evidenceInterpretation = pgEnum("evidence_interpretation", ["supports", "contradicts", "inconclusive"]);
+export const evidenceStrength = pgEnum("evidence_strength", ["weak", "moderate", "strong"]);
+export const interviewPriority = pgEnum("interview_priority", ["high", "medium", "low"]);
 
 export const appUser = pgTable("app_user", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -43,6 +62,8 @@ export const project = pgTable("project", {
   name: text("name").notNull(),
   description: text("description"),
   targetUser: text("target_user"),
+  /** unknown: never asked. detected: stated in the idea. confirmed: user answered. skipped: user declined, audience is provisional. */
+  audienceState: text("audience_state").notNull().default("unknown"),
   persona: jsonb("persona"),
   personaUpdatedAt: timestamp("persona_updated_at", { withTimezone: true }),
   voice: jsonb("voice"),
@@ -50,23 +71,18 @@ export const project = pgTable("project", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const assumption = pgTable(
-  "assumption",
+/** Free text the owner adds about a project (testing phase: text only). */
+export const projectContext = pgTable(
+  "project_context",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
-    statement: text("statement").notNull(),
-    type: assumptionType("type").notNull(),
-    risk: smallint("risk").notNull().default(3),
-    owner: text("owner"),
-    status: assumptionStatus("status").notNull().default("untested"),
-    confidence: real("confidence").notNull().default(0),
-    /** Idea mapper extras: category, origin, evidence level, falsifiedIf, leapOfFaith, test plan. */
-    meta: jsonb("meta"),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("assumption_project_idx").on(t.projectId)],
+  (t) => [index("project_context_project_idx").on(t.projectId)],
 );
 
 export const meeting = pgTable(
@@ -109,71 +125,182 @@ export const segment = pgTable(
   (t) => [unique("segment_meeting_idx_uq").on(t.meetingId, t.idx), index("segment_meeting_idx").on(t.meetingId)],
 );
 
-export const evidence = pgTable(
-  "evidence",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    meetingId: uuid("meeting_id").notNull().references(() => meeting.id, { onDelete: "cascade" }),
-    segmentId: uuid("segment_id").references(() => segment.id, { onDelete: "set null" }),
-    imageUrl: text("image_url"),
-    claim: text("claim").notNull(),
-    quote: text("quote"),
-    speaker: text("speaker"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index("evidence_meeting_idx").on(t.meetingId)],
-);
-
-export const link = pgTable(
-  "link",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    evidenceId: uuid("evidence_id").notNull().references(() => evidence.id, { onDelete: "cascade" }),
-    assumptionId: uuid("assumption_id").notNull().references(() => assumption.id, { onDelete: "cascade" }),
-    stance: evidenceStance("stance").notNull(),
-    strength: smallint("strength").notNull().default(2),
-    rationale: text("rationale"),
-    origin: linkOrigin("origin").notNull().default("model"),
-    rejected: boolean("rejected").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [unique("link_evidence_assumption_uq").on(t.evidenceId, t.assumptionId), index("link_assumption_idx").on(t.assumptionId)],
-);
-
-export const factKind = pgEnum("fact_kind", ["behavior", "pain", "goal", "language", "constraint", "tone"]);
-
-/** Observed customer behavior and language, stored as testable facts for outbound. */
-export const fact = pgTable(
-  "fact",
+/** One AI (or refine) generation attempt. The idempotency key makes retries and double submits safe. */
+export const generationRun = pgTable(
+  "generation_run",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
-    meetingId: uuid("meeting_id").notNull().references(() => meeting.id, { onDelete: "cascade" }),
-    segmentId: uuid("segment_id").references(() => segment.id, { onDelete: "set null" }),
-    kind: factKind("kind").notNull(),
-    statement: text("statement").notNull(),
-    quote: text("quote"),
-    speaker: text("speaker"),
-    /** Customer's own words worth reusing in copy. */
-    phrases: text("phrases").array().notNull().default([]),
-    /** Cheap outbound test for this fact (message, offer, or question). */
-    outboundTest: text("outbound_test"),
+    kind: generationKind("kind").notNull(),
+    status: generationStatus("status").notNull().default("pending"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    input: jsonb("input"),
+    model: text("model"),
+    examples: text("examples").array().notNull().default([]),
+    attempts: integer("attempts").notNull().default(0),
+    summary: text("summary"),
+    /** created / skipped counts, suggested changes and possibly obsolete assumptions (refine) */
+    result: jsonb("result"),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("fact_project_idx").on(t.projectId)],
+  (t) => [
+    unique("generation_run_idem_uq").on(t.projectId, t.idempotencyKey),
+    index("generation_run_project_idx").on(t.projectId, t.createdAt),
+  ],
 );
 
-export const statusEvent = pgTable(
-  "status_event",
+export const stakeholder = pgTable(
+  "stakeholder",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    assumptionId: uuid("assumption_id").notNull().references(() => assumption.id, { onDelete: "cascade" }),
-    meetingId: uuid("meeting_id").references(() => meeting.id, { onDelete: "set null" }),
-    fromStatus: assumptionStatus("from_status"),
-    toStatus: assumptionStatus("to_status").notNull(),
-    confidence: real("confidence").notNull(),
-    reason: text("reason"),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    roleName: text("role_name").notNull(),
+    description: text("description").notNull().default(""),
+    whyItMatters: text("why_it_matters").notNull().default(""),
+    relevance: smallint("relevance").notNull().default(3),
+    interviewPriority: interviewPriority("interview_priority").notNull().default("medium"),
+    recruitmentCriteria: text("recruitment_criteria").notNull().default(""),
+    interviewQuestions: text("interview_questions").array().notNull().default([]),
+    expectedEvidence: text("expected_evidence").notNull().default(""),
+    source: creationSource("source").notNull().default("ai_generated"),
+    /** normalized role name, one role per project */
+    dedupeKey: text("dedupe_key").notNull(),
+    generationRunId: uuid("generation_run_id").references(() => generationRun.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("stakeholder_dedupe_uq").on(t.projectId, t.dedupeKey),
+    unique("stakeholder_id_project_uq").on(t.id, t.projectId),
+    check("stakeholder_relevance_chk", sql`${t.relevance} between 1 and 5`),
+    index("stakeholder_project_idx").on(t.projectId),
+  ],
+);
+
+export const assumption = pgTable(
+  "assumption",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /** free text so categories can be extended; the app offers a standard list */
+    category: text("category").notNull().default("problem_severity"),
+    rationale: text("rationale").notNull().default(""),
+    impact: smallint("impact").notNull(),
+    uncertainty: smallint("uncertainty").notNull(),
+    /** impact x uncertainty, computed by the database so it can never disagree with its inputs */
+    risk: smallint("risk").generatedAlwaysAs(sql`impact * uncertainty`),
+    confidence: smallint("confidence"),
+    validationMethod: text("validation_method").notNull().default(""),
+    validationQuestions: text("validation_questions").array().notNull().default([]),
+    experimentDescription: text("experiment_description").notNull().default(""),
+    successCriteria: text("success_criteria").notNull().default(""),
+    status: validationStatus("status").notNull().default("generated"),
+    source: creationSource("source").notNull().default("ai_generated"),
+    /** true when the assumption leans on an audience the user has not confirmed */
+    provisional: boolean("provisional").notNull().default(false),
+    /** normalized title, one per project: makes regeneration idempotent */
+    dedupeKey: text("dedupe_key").notNull(),
+    generationRunId: uuid("generation_run_id").references(() => generationRun.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("assumption_dedupe_uq").on(t.projectId, t.dedupeKey),
+    unique("assumption_id_project_uq").on(t.id, t.projectId),
+    check("assumption_impact_chk", sql`${t.impact} between 1 and 5`),
+    check("assumption_uncertainty_chk", sql`${t.uncertainty} between 1 and 5`),
+    check("assumption_confidence_chk", sql`${t.confidence} is null or ${t.confidence} between 0 and 100`),
+    index("assumption_project_status_idx").on(t.projectId, t.status),
+  ],
+);
+
+/** Many to many. Both ends are forced to belong to the same project by composite foreign keys. */
+export const assumptionStakeholder = pgTable(
+  "assumption_stakeholder",
+  {
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    assumptionId: uuid("assumption_id").notNull(),
+    stakeholderId: uuid("stakeholder_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("status_event_assumption_idx").on(t.assumptionId, t.createdAt)],
+  (t) => [
+    primaryKey({ columns: [t.assumptionId, t.stakeholderId] }),
+    foreignKey({ columns: [t.assumptionId, t.projectId], foreignColumns: [assumption.id, assumption.projectId] }).onDelete("cascade"),
+    foreignKey({ columns: [t.stakeholderId, t.projectId], foreignColumns: [stakeholder.id, stakeholder.projectId] }).onDelete("cascade"),
+    index("assumption_stakeholder_stakeholder_idx").on(t.stakeholderId),
+  ],
+);
+
+/** Research results recorded by a person. Never created by the model. */
+export const assumptionEvidence = pgTable(
+  "assumption_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    assumptionId: uuid("assumption_id").notNull(),
+    stakeholderId: uuid("stakeholder_id"),
+    meetingId: uuid("meeting_id").references(() => meeting.id, { onDelete: "set null" }),
+    type: evidenceType("type").notNull(),
+    source: text("source").notNull().default(""),
+    summary: text("summary").notNull(),
+    interpretation: evidenceInterpretation("interpretation").notNull(),
+    strength: evidenceStrength("strength").notNull().default("moderate"),
+    researchedOn: date("researched_on").notNull(),
+    reference: text("reference"),
+    createdBy: uuid("created_by").references(() => appUser.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.assumptionId, t.projectId], foreignColumns: [assumption.id, assumption.projectId] }).onDelete("cascade"),
+    foreignKey({ columns: [t.stakeholderId, t.projectId], foreignColumns: [stakeholder.id, stakeholder.projectId] }),
+    index("assumption_evidence_assumption_idx").on(t.assumptionId),
+    index("assumption_evidence_stakeholder_idx").on(t.stakeholderId),
+  ],
+);
+
+/** Append-only log. The application offers no update or delete for these rows. */
+export const assumptionDecision = pgTable(
+  "assumption_decision",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    assumptionId: uuid("assumption_id").notNull(),
+    fromStatus: validationStatus("from_status").notNull(),
+    toStatus: validationStatus("to_status").notNull(),
+    rationale: text("rationale").notNull(),
+    interpretation: text("interpretation"),
+    evidenceIds: uuid("evidence_ids").array().notNull().default([]),
+    actorId: uuid("actor_id").references(() => appUser.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.assumptionId, t.projectId], foreignColumns: [assumption.id, assumption.projectId] }).onDelete("cascade"),
+    index("assumption_decision_assumption_idx").on(t.assumptionId, t.createdAt),
+  ],
+);
+
+/** Question bank: interview guide in the five act structure (docs/SystemPrompts/rightQuestions.md). */
+export const interviewGuide = pgTable(
+  "interview_guide",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    stakeholderId: uuid("stakeholder_id"),
+    title: text("title").notNull(),
+    assumptionIds: uuid("assumption_ids").array().notNull().default([]),
+    /** { acts: [{ act: 1..5, name, goal, questions: [{ text, assumptionId?, followUps[], ladder }] }], coachNotes: string[] } */
+    content: jsonb("content").notNull(),
+    model: text("model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.stakeholderId, t.projectId], foreignColumns: [stakeholder.id, stakeholder.projectId] }).onDelete("cascade"),
+    index("interview_guide_project_idx").on(t.projectId),
+  ],
 );

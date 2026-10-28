@@ -46,16 +46,31 @@ The transcription source changed several times. This is the path and the reason 
 2. **Groq key, `whisper-large-v3-turbo`:** the first key was rejected (401); a later key worked.
 3. **GLM ASR (`glm-asr-2512`):** worked, but only accepts wav or mp3 up to 30 s, which forced a browser-side decode and wav re-encode of every chunk.
 4. **Groq Whisper with an optimised pipeline:** continuous 16 kHz capture in an AudioWorklet, speech-based chunking, bounded upload queue, rate limiter, retries. Measured on three synthetic clips: pause-based chunking gave the lowest word error rate (2.6%) at about 14 requests/min; fixed 2 s and 3 s chunks had worse accuracy (9 to 10%) and exceeded Groq's 20 requests/min base limit for a single speaker. Groq bills a minimum of 10 s per request, so short chunks also cost more.
-5. **Final: browser Web Speech API (current).** No STT API key and no server-side speech cost.
+5. **Browser Web Speech API only.** Free, no key, but Chrome/Edge only and less accurate. Used for a while.
+6. **Final (current): Sarvam first, browser Web Speech API as fallback.**
 
-- **Why the final switch:** The user asked for no Groq API and for transcripts to come through LiveKit only. LiveKit has no built-in speech to text without a provider (an agent worker plus an STT service), so the free, simplest option was each participant's browser transcribing its own mic.
-- **Trade-offs of the Web Speech API:**
-  - Works in Chrome and Edge. Firefox and Safari are not supported; those users are not transcribed.
-  - Accuracy varies with browser and accent, and was not measured. Groq Whisper was measured and was better and more consistent.
-  - In Chrome the audio is sent to Google's speech service. That is a privacy point for sensitive calls.
-  - Speaker labels are supplied by the browser, so the server cannot verify who is speaking.
-  - It uses the browser's default microphone, which can differ from the one selected in the call.
-- **What would change this decision:** Needing Firefox/Safari support, higher accuracy, or verified speaker identity. The route is already provider-neutral, so a server-side STT (Groq or a LiveKit agent) could feed the same pipeline.
+- **Why:** The user supplied a Sarvam key and asked for Sarvam as first priority with the browser as the safety net. Sarvam's REST endpoint (`POST https://api.sarvam.ai/speech-to-text`, model `saaras:v4`, auto language detection) accepts wav up to 30 s and worked on the first test (about 0.5 s for a 5 s clip, `curl`).
+- **How the fallback works:** each speaker's browser captures 16 kHz audio, cuts it at pauses (2 to 8 s chunks) and uploads through a bounded queue to `POST /api/meetings/<id>/transcribe`. The server calls Sarvam, saves, then broadcasts. If Sarvam is not configured, rejects the key or hits quota (403/4xx, treated as fatal), that speaker switches to the browser's Web Speech API immediately. Transient failures (5xx, network, 429) are retried three times; two chunks failing in a row also trigger the switch. After a two minute cooldown the client tries Sarvam again.
+- **Trade-offs:**
+  - A chunk that fails on its final retry is lost; the fallback only covers speech from the switch onward. There is a gap of a few seconds around a switch.
+  - Two code paths now exist (server STT and browser STT), so behaviour differs by mode: Sarvam mode has no draft text, browser mode does.
+  - Sarvam mode needs the capture pipeline back (AudioWorklet, pause-based chunking, upload queue). That pipeline had been removed once and was rebuilt; its logic is covered by unit tests.
+  - Sarvam pricing, rate limits and any minimum billing per request were not found in the docs read, so cost and request-rate limits are unverified. The earlier Groq finding (10 s minimum billing, 20 requests/min) does not apply here.
+  - Sarvam gives no diarization on this endpoint; the speaker label is the participant who uploaded the chunk.
+  - Fallback to the browser has all the earlier browser trade-offs: Chrome and Edge only, accuracy varies, Chrome sends audio to Google, speaker labels come from the browser, default microphone may differ.
+  - Language is auto-detected (`SARVAM_LANGUAGE=unknown`); set a code such as `en-IN` for steadier results on short chunks.
+- **What would change this decision:** Sarvam cost or limits turning out poor, or needing verified speaker identity.
+
+## Project context
+
+**Decision:** Owners can attach plain text notes ("context") to a project: a title and a body, many entries, add, edit, delete. Text only for the testing phase. Stored in a new table `project_context` (migration `0004`), shown on a Context tab in the project. Nothing else reads it yet.
+
+- **Why a new table:** several entries per project with their own titles and timestamps, and no misuse of old columns. The user chose this over reusing the unused `project.persona` column for a single text block. It is a second schema change after the auth one, approved when asked.
+- **Edit project form:** projects can now be edited (name, target user, description). The form also has a Context textarea, saved as one entry titled "Project context" (created, updated, or removed when emptied), in the same database transaction as the project change. The Context tab still manages any number of other entries. Trade-off: the entry is identified by its title, so a note a user titles "Project context" on the Context tab is treated as the same entry. An API edit that omits `context` leaves it unchanged.
+- **Limits:** 120 characters for a title, 20,000 for a body, 50 entries per project. These are testing-phase guards, not product decisions.
+- **Access:** project owner only, through the same ownership check as projects. Other users get 404; signed-out requests get 401. Guests do not see context, and it is not shown inside the call (the user chose "store and show only").
+- **Trade-offs:** no files, links, rich text, search, versioning, or reordering. Entry count is checked before insert without a lock, so two simultaneous adds at the limit could exceed 50 by one. Content is rendered as plain text (no HTML), so there is no injection risk from stored text.
+- **What would change this decision:** using context as input to something (for example prompts, call panels, or search) would raise questions about size limits, ordering, and who may read it.
 
 ## Transcript delivery
 
@@ -92,7 +107,7 @@ The transcription source changed several times. This is the path and the reason 
 
 ## Things deliberately not done
 
-- No streaming STT claim: Groq Whisper is batch, so it could never be word-by-word; Web Speech gives interim text but is a different trade-off.
+- No streaming STT claim: Sarvam is used in batch mode (whole chunks), so it is never word-by-word; only browser mode shows draft text.
 - No stored interim text.
 - No change to Neon region, connection pooling, or hosting.
 - No full removal of unused tables or packages.
@@ -100,8 +115,8 @@ The transcription source changed several times. This is the path and the reason 
 
 ## Known gaps and risks
 
-- Browser capture, the Web Speech path, and two-browser LiveKit delivery were not tested in a real call. Server routes were tested with `curl`.
+- Browser capture (Sarvam path), the Web Speech fallback, the automatic switch between them, and two-browser LiveKit delivery were not tested in a real call. Server routes and the Sarvam error handling were tested with `curl` and scripts.
 - Lint reports errors (refs read during render, setState in effects) in the call page. Some existed before this work; they do not break the build or tests.
-- API keys were pasted into chat during development (Gemini, GLM, several Groq keys, LiveKit secret). They should be treated as exposed and rotated.
+- API keys were pasted into chat during development (Gemini, GLM, several Groq keys, Sarvam, LiveKit secret). They should be treated as exposed and rotated.
 - The README still describes the original assumption-testing product.
 - A 409 on saving a line means the meeting was already ended; a stale browser tab can show this.

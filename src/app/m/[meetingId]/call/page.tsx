@@ -14,7 +14,10 @@ import { Input, Label } from "@/components/ui/form";
 import { api, ApiRequestError, type MeetingDetail, type Segment } from "@/lib/api";
 import { GUEST_NAME_KEY } from "@/lib/guest";
 import { useMe } from "@/lib/auth";
+import { DEFAULT_ENDPOINTER, Endpointer } from "@/lib/audio/endpointer";
 import { Window } from "@/lib/audio/metrics";
+import { UploadQueue } from "@/lib/audio/upload-queue";
+import { encodeWav } from "@/lib/audio/wav";
 import { insertSegment } from "@/lib/transcript";
 import { fmtTime } from "@/lib/utils";
 import { useProjectEvents } from "@/lib/use-project-events";
@@ -55,10 +58,34 @@ export interface Interim {
   text: string;
 }
 
+const CAPTURE_WORKLET = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.b = new Float32Array(1600); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let k = 0; k < ch.length; k++) {
+      this.b[this.n++] = ch[k];
+      if (this.n === 1600) { this.port.postMessage(this.b.slice(0)); this.n = 0; }
+    }
+    return true;
+  }
+}
+registerProcessor("cap", Cap);
+`;
+
+type Mode = "sarvam" | "browser";
+/** Chunks that fail this many times in a row switch the speaker to the browser's speech recognition. */
+const FAILS_BEFORE_FALLBACK = 2;
+/** After a fallback, try Sarvam again once this much time has passed. */
+const FALLBACK_COOLDOWN_MS = 120_000;
+
 /**
- * Each browser transcribes its own mic with the Web Speech API (no server STT, no API key).
- * Final phrases are saved by the server and broadcast over LiveKit. Interim text goes straight
- * over the LiveKit data channel for display only and is never stored.
+ * Speech to text for the local mic. First choice: Sarvam, through the server (continuous 16 kHz capture,
+ * cut at pauses, uploaded through a bounded queue). If Sarvam is not configured, rejects the key, or
+ * keeps failing, this switches to the browser's Web Speech API and retries Sarvam after a cooldown.
+ * Final phrases from either path are saved by the server and broadcast over LiveKit. Interim text
+ * (browser mode only) goes over the LiveKit data channel for display and is never stored.
  */
 function Transcriber({
   meetingId,
@@ -72,21 +99,142 @@ function Transcriber({
   onSegment: (s: Segment) => void;
 }) {
   const room = useRoomContext();
-  const { isMicrophoneEnabled } = useLocalParticipant();
-  const [supported, setSupported] = useState(true);
+  const { isMicrophoneEnabled, microphoneTrack } = useLocalParticipant();
+  const mediaTrack = microphoneTrack?.track?.mediaStreamTrack;
+  const [mode, setMode] = useState<Mode>("sarvam");
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [supported, setSupported] = useState(true);
   const startRef = useRef(startedAt);
   startRef.current = startedAt;
   const segRef = useRef(onSegment);
   segRef.current = onSegment;
+  const failures = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const fallback = useCallback((reason: string) => {
+    setMode("browser");
+    setNotice(reason);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => {
+      failures.current = 0;
+      setNotice(null);
+      setMode("sarvam");
+    }, FALLBACK_COOLDOWN_MS);
+  }, []);
+  useEffect(() => () => void (retryTimer.current && clearTimeout(retryTimer.current)), []);
+
+  // ---- Sarvam (first priority) ----
   useEffect(() => {
-    if (!isMicrophoneEnabled) return;
+    if (mode !== "sarvam" || !isMicrophoneEnabled || !mediaTrack) return;
+    if (typeof AudioWorkletNode === "undefined") {
+      setTimeout(() => fallback("This browser cannot capture raw audio"), 0);
+      return;
+    }
+    let active = true;
+    const stream = new MediaStream([mediaTrack.clone()]);
+    const ctx = new AudioContext({ sampleRate: 16_000 });
+    const rate = ctx.sampleRate;
+    const url = URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: "application/javascript" }));
+    const ep = new Endpointer({ ...DEFAULT_ENDPOINTER, sampleRate: rate });
+    let wallStart = 0;
+    let seq = 0;
+
+    const queue = new UploadQueue({
+      maxPending: 4,
+      maxAttempts: 3,
+      maxMergedSec: 28,
+      sampleRate: rate,
+      onFailed: () => {
+        failures.current++;
+        if (failures.current >= FAILS_BEFORE_FALLBACK) fallback("Sarvam is not responding, using browser speech recognition");
+      },
+      send: async (c) => {
+        const fd = new FormData();
+        fd.append("audio", new Blob([encodeWav(c.samples, rate)], { type: "audio/wav" }), "chunk.wav");
+        fd.append("speaker", name);
+        fd.append("clientId", c.chunkId);
+        fd.append("startSec", String(c.startSec));
+        fd.append("capturedAt", String(c.capturedAt));
+        try {
+          const r = await fetch(`/api/meetings/${meetingId}/transcribe`, { method: "POST", body: fd });
+          if (r.ok) {
+            failures.current = 0;
+            setError(null);
+            const j = (await r.json().catch(() => null)) as { segment?: Segment | null } | null;
+            if (j?.segment) segRef.current(j.segment);
+            return { ok: true };
+          }
+          const body = (await r.json().catch(() => null)) as { error?: { code?: string; message?: string; fatal?: boolean } } | null;
+          const err = body?.error;
+          if (err?.code === "stt_unavailable") {
+            if (err.fatal) {
+              fallback(err.message?.includes("not configured") ? "Sarvam is not configured, using browser speech recognition" : "Sarvam rejected the request, using browser speech recognition");
+              return { ok: false, retryable: false };
+            }
+            return { ok: false, retryable: true };
+          }
+          // Our own errors (ended meeting, bad request, no access) are not Sarvam failures.
+          setError(err?.message ?? `HTTP ${r.status}`);
+          return { ok: false, retryable: r.status >= 500 };
+        } catch (e) {
+          setError((e as Error).message);
+          return { ok: false, retryable: true };
+        }
+      },
+    });
+
+    const submit = (chunk: ReturnType<Endpointer["push"]>) => {
+      if (!chunk) return;
+      const rel = startRef.current ? (wallStart + chunk.startMs - startRef.current) / 1000 : 0;
+      queue.push({
+        chunkId: crypto.randomUUID(),
+        seq: seq++,
+        samples: chunk.samples,
+        startSec: Math.max(0, rel),
+        capturedAt: wallStart + chunk.startMs + chunk.durationMs,
+        enqueuedAt: Date.now(),
+      });
+    };
+
+    let node: AudioWorkletNode | null = null;
+    void (async () => {
+      try {
+        await ctx.resume();
+        await ctx.audioWorklet.addModule(url);
+        if (!active) return;
+        const src = ctx.createMediaStreamSource(stream);
+        node = new AudioWorkletNode(ctx, "cap");
+        const mute = ctx.createGain();
+        mute.gain.value = 0;
+        src.connect(node);
+        node.connect(mute).connect(ctx.destination);
+        wallStart = Date.now();
+        node.port.onmessage = (e: MessageEvent<Float32Array>) => submit(ep.push(e.data));
+      } catch (e) {
+        if (active) fallback(`Audio capture failed (${(e as Error).message}), using browser speech recognition`);
+      }
+    })();
+
+    return () => {
+      active = false;
+      submit(ep.flush());
+      if (node) node.port.onmessage = null;
+      stream.getTracks().forEach((t) => t.stop());
+      URL.revokeObjectURL(url);
+      void ctx.close();
+    };
+  }, [mode, isMicrophoneEnabled, mediaTrack, meetingId, name, fallback]);
+
+  // ---- Browser Web Speech API (fallback) ----
+  useEffect(() => {
+    if (mode !== "browser" || !isMicrophoneEnabled) return;
     const Ctor = recognizerCtor();
     if (!Ctor) {
       setSupported(false);
       return;
     }
+    setSupported(true);
     let active = true;
     let utteranceStart = 0;
     let chain: Promise<void> = Promise.resolve();
@@ -155,13 +303,13 @@ function Transcriber({
       }
     };
     // Chrome ends a session after a long pause. Restart while the mic is on.
-    rec.onend = () => {
-      if (active) setTimeout(() => active && safeStart(), 250);
-    };
     const safeStart = () => {
       try {
         rec.start();
       } catch {}
+    };
+    rec.onend = () => {
+      if (active) setTimeout(() => active && safeStart(), 250);
     };
     safeStart();
 
@@ -173,22 +321,36 @@ function Transcriber({
       } catch {}
       publishInterim("");
     };
-  }, [isMicrophoneEnabled, meetingId, name, room]);
+  }, [mode, isMicrophoneEnabled, meetingId, name, room]);
 
   return (
     <>
-      {!supported && (
-        <div className="absolute left-3 top-3 z-10 max-w-xs rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" role="status">
-          This browser has no speech recognition. Use Chrome or Edge to be transcribed.
+      {isMicrophoneEnabled && (
+        <div
+          className="absolute right-3 top-3 z-10 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+          role="status"
+          title={notice ?? undefined}
+        >
+          {mode === "sarvam" ? "Transcribing: Sarvam" : "Transcribing: browser speech (fallback)"}
         </div>
       )}
-      {supported && !isMicrophoneEnabled && (
+      {mode === "browser" && !supported && (
+        <div className="absolute left-3 top-3 z-10 max-w-xs rounded-md border border-warning/30 bg-warning-tint p-2 text-xs text-warning" role="status">
+          Sarvam is unavailable and this browser has no speech recognition. Use Chrome or Edge.
+        </div>
+      )}
+      {!isMicrophoneEnabled && (
         <div className="absolute left-3 top-3 z-10 flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           <MicOff className="size-3" aria-hidden /> Mic off, not transcribing
         </div>
       )}
+      {notice && mode === "browser" && (
+        <div className="absolute left-3 top-12 z-10 max-w-sm rounded-md border border-warning/30 bg-warning-tint p-2 text-xs text-warning" role="status">
+          {notice}
+        </div>
+      )}
       {error && (
-        <div className="absolute left-3 top-12 z-10 max-w-sm rounded-md border border-destructive/40 bg-card p-2 text-xs text-destructive" role="alert">
+        <div className="absolute left-3 bottom-12 z-10 max-w-sm rounded-md border border-destructive/40 bg-card p-2 text-xs text-destructive" role="alert">
           Transcription: {error}
         </div>
       )}
@@ -434,7 +596,7 @@ export default function CallPage() {
     return (
       <main className="mx-auto max-w-md px-4 py-20">
         <form
-          className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
+          className="space-y-4 rounded-lg border bg-card p-6"
           onSubmit={(e) => {
             e.preventDefault();
             const n = draftName.trim();
@@ -466,10 +628,10 @@ export default function CallPage() {
         <div className="ml-auto flex items-center gap-3 text-xs">
           <span className="tabular-nums font-medium" aria-label="Meeting timer">{fmtTime(elapsed)}</span>
           <span className="flex items-center gap-1" role="status">
-            <span className={`size-2 rounded-full ${lkState === ConnectionState.Connected ? "bg-emerald-500" : "bg-amber-500"}`} />
+            <span className={`size-2 rounded-full ${lkState === ConnectionState.Connected ? "bg-positive" : "bg-warning"}`} />
             {lkState === ConnectionState.Connected ? "Connected" : lkState === ConnectionState.Connecting ? "Connecting" : lkState}
           </span>
-          {!connected && <span className="text-amber-600">Live updates reconnecting</span>}
+          {!connected && <span className="text-warning">Live updates reconnecting</span>}
           <Button
             size="sm"
             variant="outline"

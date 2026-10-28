@@ -1,0 +1,1 @@
+ALTER TABLE "assumption" ADD COLUMN "provisional" boolean DEFAULT false NOT NULL;

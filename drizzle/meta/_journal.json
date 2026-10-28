@@ -29,6 +29,34 @@
       "when": 1793021424691,
       "tag": "0003_complete_black_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793175837046,
+      "tag": "0004_needy_naoko",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793177427525,
+      "tag": "0005_orange_ikaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793177542163,
+      "tag": "0006_pretty_anita_blake",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793177704346,
+      "tag": "0007_flawless_pandemic",
+      "breakpoints": true
     }
   ]
 }

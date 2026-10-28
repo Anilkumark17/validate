@@ -8,7 +8,8 @@ Current code: projects, meetings (LiveKit video call with invite link), and live
 flowchart LR
     subgraph Browser["Browser (Next.js client)"]
         Pages["Pages<br/>/ , /login , /join/code<br/>/p/id/meetings , /m/id/call"]
-        Speech["Web Speech API<br/>per-participant mic to text"]
+        Capture["Audio capture<br/>16 kHz, pause-based chunks, upload queue"]
+        Speech["Web Speech API<br/>fallback only"]
         LKClient["livekit-client<br/>video, audio, data channel"]
         Cache["TanStack Query cache<br/>meeting + segments"]
     end
@@ -16,7 +17,9 @@ flowchart LR
     subgraph Next["Next.js server (route handlers)"]
         Auth["server/auth.ts<br/>session + guest cookies"]
         API["API routes<br/>/api/auth, projects, meetings, livekit/token"]
-        SegRoute["POST /api/meetings/id/segments"]
+        TrRoute["POST /api/meetings/id/transcribe"]
+        Sarvam["server/stt.ts<br/>Sarvam speech to text"]
+        SegRoute["POST /api/meetings/id/segments<br/>text from fallback"]
         SSE["server/sse.ts<br/>in-memory event hub"]
         LKServer["server/livekit.ts<br/>RoomServiceClient.sendData"]
         Dedupe["segment-dedupe.ts<br/>clientId TTL map"]
@@ -27,6 +30,14 @@ flowchart LR
 
     Pages --> API
     Pages -->|"EventSource"| SSE
+    Capture -->|"wav chunk"| TrRoute
+    TrRoute --> Sarvam
+    Sarvam -->|"HTTPS"| SarvamCloud["Sarvam API"]
+    TrRoute --> Auth
+    TrRoute --> Dedupe
+    TrRoute -->|"insert, then broadcast"| DB
+    TrRoute --> LKServer
+    Capture -.->|"Sarvam failed twice or not configured"| Speech
     Speech --> SegRoute
     Speech -->|"interim text"| LKClient
     LKClient <-->|"WebSocket"| LKCloud
@@ -45,32 +56,40 @@ flowchart LR
 
 ## 2. Live transcript flow
 
-Final phrases are saved first, then broadcast. Interim text is display only and never stored.
+Primary path: Sarvam. Final lines are saved first, then broadcast.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant A as Browser A (speaker)
     participant S as Next.js server
+    participant SV as Sarvam API
     participant DB as Postgres
     participant LK as LiveKit room (WebSocket)
     participant B as Browser B (other participant)
 
-    A->>A: Web Speech API recognizes own mic
-    A->>LK: interim text (publishData, topic interim, lossy)
-    LK-->>B: interim shown in italics
-
-    A->>S: POST /api/meetings/id/segments {speaker, text, startSec, clientId}
-    S->>S: requireMeetingAccess (1 query) and validate
-    S->>S: clientId seen before? return first result
+    A->>A: AudioWorklet captures 16 kHz PCM, cut at pauses (2 to 8 s)
+    A->>S: POST /api/meetings/id/transcribe (wav, clientId)
+    S->>S: requireMeetingAccess (1 query), validate wav
+    S->>SV: POST /speech-to-text (saaras:v4, language unknown)
+    SV-->>S: transcript
     S->>DB: INSERT segment (idx from subselect)
-    DB-->>S: saved row
     S-->>A: 201 {segment}
-    Note over A: speaker applies the saved row at once
-    S->>LK: sendData topic transcript (about 1 s, not awaited by the response)
+    S->>LK: sendData topic transcript (not awaited by the response)
     LK-->>A: DataReceived (deduped by segment id)
     LK-->>B: DataReceived
-    Note over B: insert in start-time order, clear interim line
+    Note over B: insert in start-time order
+
+    rect rgb(255,245,230)
+    Note over A,S: Fallback when Sarvam is not configured, rejects the key, or fails twice in a row
+    SV--xS: error
+    S-->>A: 503 stt_unavailable
+    A->>A: switch to Web Speech API for 2 minutes, then retry Sarvam
+    A->>LK: interim text (topic interim, display only)
+    A->>S: POST /api/meetings/id/segments (final text, clientId)
+    S->>DB: INSERT segment
+    S->>LK: sendData topic transcript
+    end
 
     rect rgb(240,240,240)
     Note over B,S: Reload or reconnect
@@ -90,13 +109,13 @@ flowchart TD
     Kind -->|"meetings/by-code/code"| Public2["Public<br/>title and project name only"]
     Kind -->|"livekit/token with inviteCode"| Invite["Public<br/>sets guest cookie for that one meeting"]
 
-    Kind -->|"projects, projects/id, projects/id/meetings"| Proj{"session cookie<br/>valid?"}
+    Kind -->|"projects, projects/id, projects/id/meetings,<br/>projects/id/context"| Proj{"session cookie<br/>valid?"}
     Proj -->|"no"| R401["401"]
     Proj -->|"yes"| Own{"project.owner_id<br/>= session user?"}
     Own -->|"no"| R404["404 (id not leaked)"]
     Own -->|"yes"| OK1["Allowed"]
 
-    Kind -->|"meetings/id GET, start, segments,<br/>livekit/token with meetingId"| Mtg{"owner of the<br/>meeting's project?"}
+    Kind -->|"meetings/id GET, start, transcribe, segments,<br/>livekit/token with meetingId"| Mtg{"owner of the<br/>meeting's project?"}
     Mtg -->|"yes"| Host["Host access"]
     Mtg -->|"no"| Guest{"guest cookie lists<br/>this meeting?"}
     Guest -->|"yes"| GuestOK["Guest access"]
@@ -122,6 +141,7 @@ flowchart LR
         P3["/join/code"]
         P4["/p/id (redirects)"]
         P5["/p/id/meetings"]
+        P5b["/p/id/context"]
         P6["/m/id/call"]
     end
 
@@ -130,6 +150,7 @@ flowchart LR
         A2["/api/projects"]
         A3["/api/projects/id"]
         A4["/api/projects/id/meetings"]
+        A4b["/api/projects/id/context, context/contextId"]
         A5["/api/projects/id/events"]
         A6["/api/meetings/by-code/code"]
         A7["/api/livekit/token"]
@@ -137,6 +158,7 @@ flowchart LR
         A9["/api/meetings/id/start"]
         A10["/api/meetings/id/end"]
         A11["/api/meetings/id/segments"]
+        A11b["/api/meetings/id/transcribe"]
         A12["/api/health"]
     end
 
@@ -148,11 +170,13 @@ flowchart LR
     P5 --> A3
     P5 --> A4
     P5 --> A5
+    P5b --> A4b
     P6 --> A8
     P6 --> A7
     P6 --> A9
     P6 --> A10
     P6 --> A11
+    P6 --> A11b
     P6 --> A5
 ```
 
@@ -164,6 +188,8 @@ flowchart TD
     Routes --> auth["server/auth.ts<br/>hash, sign, cookies, access checks"]
     Routes --> queries["server/queries.ts<br/>getProject, getMeeting, createMeeting"]
     Routes --> segments["server/segments.ts<br/>addSegment"]
+    Routes --> stt["server/stt.ts<br/>transcribeSarvam"]
+    stt --> env
     Routes --> livekitmod["server/livekit.ts<br/>broadcastSegment"]
     Routes --> dedupe["server/segment-dedupe.ts<br/>TtlMap"]
     Routes --> sse["server/sse.ts<br/>publish, subscribe"]
@@ -184,6 +210,7 @@ Other tables from the earlier product (assumption, evidence, link, fact, status_
 ```mermaid
 erDiagram
     app_user ||--o{ project : owns
+    project ||--o{ project_context : has
     project ||--o{ meeting : has
     meeting ||--o{ segment : contains
 
@@ -201,6 +228,14 @@ erDiagram
         text description
         text target_user
         timestamptz created_at
+    }
+    project_context {
+        uuid id PK
+        uuid project_id FK
+        text title
+        text content "plain text, max 20000 chars"
+        timestamptz created_at
+        timestamptz updated_at
     }
     meeting {
         uuid id PK

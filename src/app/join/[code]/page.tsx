@@ -1,6 +1,5 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import { Video } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PageState, TopBar } from "@/components/app-shell";
@@ -33,13 +32,12 @@ export default function JoinPage() {
   return (
     <>
       <TopBar />
-      <main className="mx-auto max-w-md px-4 py-16">
+      <main className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-md flex-col justify-center px-4 py-10">
         <PageState loading={isLoading} error={error ? "This invite link is not valid." : null} />
         {data && (
-          <div className="rounded-xl border bg-card p-6 shadow-sm">
-            <div className="mb-4 grid size-10 place-items-center rounded-lg bg-primary/10 text-primary"><Video className="size-5" aria-hidden /></div>
-            <p className="text-xs text-muted-foreground">{data.projectName}</p>
-            <h1 className="text-xl font-semibold">{data.title}</h1>
+          <div className="rounded-lg border bg-card p-5">
+            <p className="text-sm text-muted-foreground">You are invited to a customer interview for {data.projectName}</p>
+            <h1 className="mt-1 text-2xl font-semibold leading-8 tracking-tight">{data.title}</h1>
             {data.state === "ended" ? (
               <p className="mt-4 text-sm text-muted-foreground">This meeting has ended.</p>
             ) : (

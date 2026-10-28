@@ -30,6 +30,20 @@ export interface Project {
   targetUser: string | null;
   createdAt: string;
   meetingCount?: number;
+  assumptionTotal?: number;
+  progressPercent?: number;
+  audienceState?: "unknown" | "detected" | "confirmed" | "skipped";
+  /** Text of the main "Project context" entry (single project reads and saves only). */
+  context?: string;
+}
+
+export interface ContextEntry {
+  id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Meeting {

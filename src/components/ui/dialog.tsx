@@ -19,30 +19,31 @@ export function DialogContent({
   children: React.ReactNode;
   title: string;
   description?: string;
-  side?: "center" | "right";
+  side?: "center" | "right" | "left";
 }) {
+  const sheet = side !== "center";
   return (
     <D.Portal>
-      <D.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px]" />
+      <D.Overlay className="fixed inset-0 z-50 bg-black/40" />
       <D.Content
         className={cn(
-          "fixed z-50 bg-card shadow-xl border outline-none flex flex-col",
-          side === "center"
-            ? "left-1/2 top-1/2 w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg p-6 max-h-[90vh] overflow-y-auto"
-            : "right-0 top-0 h-full w-full max-w-xl border-l overflow-y-auto",
+          "fixed z-50 flex flex-col border bg-card shadow-lg outline-none",
+          side === "center" && "left-1/2 top-1/2 max-h-[90vh] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg p-6",
+          side === "right" && "right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-y-0 border-r-0",
+          side === "left" && "left-0 top-0 h-full w-72 overflow-y-auto border-y-0 border-l-0",
           className,
         )}
       >
-        <div className={cn(side === "right" && "sticky top-0 z-10 bg-card border-b px-6 py-4")}>
-          <D.Title className="text-base font-semibold pr-8">{title}</D.Title>
+        <div className={cn(sheet && "sticky top-0 z-10 border-b bg-card px-5 py-4")}>
+          <D.Title className="pr-8 text-base font-semibold leading-6">{title}</D.Title>
           {description ? (
             <D.Description className="mt-1 text-sm text-muted-foreground">{description}</D.Description>
           ) : (
             <D.Description className="sr-only">{title}</D.Description>
           )}
         </div>
-        <div className={cn(side === "right" ? "px-6 py-4" : "mt-4")}>{children}</div>
-        <D.Close aria-label="Close" className="absolute right-4 top-4 rounded-md p-1 hover:bg-muted">
+        <div className={cn(sheet ? "px-5 py-4" : "mt-5")}>{children}</div>
+        <D.Close aria-label="Close" className="absolute right-3 top-3 grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
           <X className="size-4" />
         </D.Close>
       </D.Content>

@@ -2,33 +2,51 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Achromatic ledger. The chrome is ink on a cool grey ground. The one hue (--chart) marks the main
+ * data element: how much of the project has been tested. Everything else is neutral.
+ */
 :root {
-  --background: oklch(0.985 0.002 250);
-  --foreground: oklch(0.21 0.02 260);
-  --card: oklch(1 0 0);
-  --muted: oklch(0.96 0.005 250);
-  --muted-foreground: oklch(0.5 0.02 255);
-  --border: oklch(0.92 0.006 250);
-  --input: oklch(0.9 0.008 250);
-  --primary: oklch(0.52 0.19 275);
-  --primary-foreground: oklch(0.99 0 0);
-  --ring: oklch(0.52 0.19 275);
-  --destructive: oklch(0.55 0.21 25);
-  --radius: 0.625rem;
+  --background: #f2f4f7;
+  --foreground: #0f1115;
+  --card: #ffffff;
+  --muted: #eaedf1;
+  --muted-foreground: #5b6371;
+  --border: #e0e4ea;
+  --rule: #edf0f3;
+  --input: #cdd2da;
+  --primary: #14161a;
+  --primary-foreground: #ffffff;
+  --ring: #1d5fbf;
+  --chart: #1d5fbf;
+  --chart-tint: #e6eefa;
+  --chart-ink: #14407f;
+  --destructive: #c4242a;
+  --positive: #247b50;
+  --warning: #92400e;
+  --warning-tint: #fffbeb;
+  --radius: 0.5rem;
 }
 
 .dark {
-  --background: oklch(0.17 0.012 260);
-  --foreground: oklch(0.95 0.005 250);
-  --card: oklch(0.2 0.014 260);
-  --muted: oklch(0.25 0.014 260);
-  --muted-foreground: oklch(0.7 0.015 255);
-  --border: oklch(0.3 0.015 260);
-  --input: oklch(0.33 0.016 260);
-  --primary: oklch(0.7 0.16 275);
-  --primary-foreground: oklch(0.15 0.02 270);
-  --ring: oklch(0.7 0.16 275);
-  --destructive: oklch(0.7 0.19 25);
+  --background: #0c0d0f;
+  --foreground: #f4f5f6;
+  --card: #151618;
+  --muted: #1f2124;
+  --muted-foreground: #a3a8b0;
+  --border: #272a2e;
+  --rule: #1d1f22;
+  --input: #3a3e44;
+  --primary: #f4f5f6;
+  --primary-foreground: #0c0d0f;
+  --ring: #7aa7ec;
+  --chart: #7aa7ec;
+  --chart-tint: #17243a;
+  --chart-ink: #b9d0f7;
+  --destructive: #ef6b72;
+  --positive: #4cc38a;
+  --warning: #f0b36b;
+  --warning-tint: #2a2013;
 }
 
 @theme inline {
@@ -38,27 +56,44 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-rule: var(--rule);
   --color-input: var(--input);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-ring: var(--ring);
+  --color-chart: var(--chart);
+  --color-chart-tint: var(--chart-tint);
+  --color-chart-ink: var(--chart-ink);
   --color-destructive: var(--destructive);
+  --color-positive: var(--positive);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 * {
   border-color: var(--border);
 }
 
+html {
+  font-size: 16px;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Figures line up digit for digit anywhere they are compared. */
+.num {
+  font-variant-numeric: tabular-nums;
 }
 
 :focus-visible {
@@ -66,16 +101,13 @@ body {
   outline-offset: 2px;
 }
 
-@keyframes flash {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 60%, transparent);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
-  100% {
-    box-shadow: 0 0 0 10px transparent;
-  }
-}
-.flash {
-  animation: flash 1.1s ease-out;
 }
 
 /* LiveKit overrides */
