@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireMeetingAccess } from "@/server/auth";
 import { ApiError, handle, parseBody, rateLimit } from "@/server/http";
 import { broadcastSegment } from "@/server/livekit";
+import { enforceMeetingTime } from "@/server/limits";
 import { savedSegments } from "@/server/segment-dedupe";
 import { addSegment } from "@/server/segments";
 
@@ -26,7 +27,7 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   rateLimit(req, "segments", 240);
   const { id } = await ctx.params;
   const { meeting: m } = await requireMeetingAccess(req, id);
-  if (m.state === "ended") throw new ApiError(409, "ended", "Meeting already ended");
+  await enforceMeetingTime(m);
   const v = await parseBody(req, input);
 
   // A retried POST with the same clientId gets the first result: no second row, no second broadcast.

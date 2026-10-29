@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireProject } from "@/server/auth";
 import { db, schema } from "@/server/db";
 import { handle, parseBody } from "@/server/http";
+import { assertCanCreateMeeting } from "@/server/limits";
 import { createMeeting } from "@/server/queries";
 import { meetingInput } from "@/lib/schemas";
 
@@ -22,8 +23,9 @@ export const GET = handle(async (req: Request, ctx: Ctx) => {
 
 export const POST = handle(async (req: Request, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireProject(req, id);
+  const { user } = await requireProject(req, id);
   const v = await parseBody(req, meetingInput);
+  await assertCanCreateMeeting(user);
   const m = await createMeeting(id, {
     title: v.title,
     scheduledFor: v.scheduledFor ? new Date(v.scheduledFor) : null,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireMeetingAccess } from "@/server/auth";
 import { ApiError, handle, rateLimit } from "@/server/http";
 import { broadcastSegment } from "@/server/livekit";
+import { enforceMeetingTime } from "@/server/limits";
 import { savedSegments } from "@/server/segment-dedupe";
 import { addSegment } from "@/server/segments";
 import { SttError, transcribeSarvam } from "@/server/stt";
@@ -35,7 +36,7 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   const t0 = Date.now();
   const { id } = await ctx.params;
   const { meeting: m } = await requireMeetingAccess(req, id);
-  if (m.state === "ended") throw new ApiError(409, "ended", "Meeting already ended");
+  await enforceMeetingTime(m);
 
   const form = await req.formData();
   const audio = form.get("audio");

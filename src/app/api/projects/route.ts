@@ -4,6 +4,7 @@ import { projectBasics } from "@/lib/board/schemas";
 import { requireUser } from "@/server/auth";
 import { db, schema } from "@/server/db";
 import { handle, parseBody } from "@/server/http";
+import { assertCanCreateProject } from "@/server/limits";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const user = await requireUser(req);
   const v = await parseBody(req, projectBasics);
+  await assertCanCreateProject(user);
   const [p] = await db().insert(schema.project).values({ name: v.name, description: v.idea, ownerId: user.id }).returning();
   return NextResponse.json(p, { status: 201 });
 });

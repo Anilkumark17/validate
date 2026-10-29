@@ -14,6 +14,7 @@ import { Input, Label } from "@/components/ui/form";
 import { api, ApiRequestError, type MeetingDetail, type Segment } from "@/lib/api";
 import { GUEST_NAME_KEY } from "@/lib/guest";
 import { useMe } from "@/lib/auth";
+import { MAX_MEETING_MIN, MAX_MEETING_SEC, isExempt } from "@/lib/limits";
 import { DEFAULT_ENDPOINTER, Endpointer } from "@/lib/audio/endpointer";
 import { Window } from "@/lib/audio/metrics";
 import { UploadQueue } from "@/lib/audio/upload-queue";
@@ -565,6 +566,17 @@ export default function CallPage() {
     mutationFn: () => api(`/meetings/${meetingId}/end`, { method: "POST" }),
     onSuccess: leave,
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Mirror of the server limit: the host's browser ends the call at the time limit. The server enforces it too.
+  const limitHit = !!startedAt && !isExempt(me.data?.email) && now - startedAt >= MAX_MEETING_SEC * 1000;
+  const autoEnded = useRef(false);
+  useEffect(() => {
+    if (limitHit && me.data && !autoEnded.current) {
+      autoEnded.current = true;
+      toast.message(`Time limit of ${MAX_MEETING_MIN} minutes reached. Ending the call.`);
+      end.mutate();
+    }
   });
 
   if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {

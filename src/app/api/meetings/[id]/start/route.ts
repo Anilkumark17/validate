@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/server/db";
 import { ApiError, handle } from "@/server/http";
 import { requireMeetingAccess } from "@/server/auth";
+import { enforceMeetingTime } from "@/server/limits";
 import { publish } from "@/server/sse";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const { id } = await ctx.params;
   const { meeting: m } = await requireMeetingAccess(req, id);
-  if (m.state === "ended") throw new ApiError(409, "ended", "Meeting already ended");
+  await enforceMeetingTime(m);
   if (m.state === "live") return NextResponse.json({ startedAt: m.startedAt, state: m.state });
   const [row] = await db()
     .update(schema.meeting)
