@@ -2,22 +2,20 @@ import type { Metadata } from "next";
 import "@fontsource/instrument-serif/400.css";
 import "@fontsource/instrument-serif/400-italic.css";
 import "@/components/landing/landing.css";
-import { Board } from "@/components/landing/board";
-import { Cta } from "@/components/landing/cta";
-import { Faq } from "@/components/landing/faq";
-import { Features } from "@/components/landing/features";
+import { Avatars } from "@/components/landing/avatars";
+import { Demo } from "@/components/landing/demo";
+import { FinalCta } from "@/components/landing/final-cta";
 import { Footer } from "@/components/landing/footer";
 import { Hero } from "@/components/landing/hero";
-import { Pinned } from "@/components/landing/pinned";
-import { Price } from "@/components/landing/price";
+import { Problem } from "@/components/landing/problem";
 import { RevealController } from "@/components/landing/reveal";
-import { Roadmap } from "@/components/landing/roadmap";
-import { Statement } from "@/components/landing/statement";
-import { Verdict } from "@/components/landing/verdict";
+import { UseCases } from "@/components/landing/use-cases";
+import { Why } from "@/components/landing/why";
+import { Workflow } from "@/components/landing/workflow";
 
 export const metadata: Metadata = {
-  title: "Validate: price every bet before you build",
-  description: "Validate shows product managers which roadmap bets rest on a guess, runs the customer interviews that test them, and keeps the evidence for every decision.",
+  title: "Validate: simulate how your customers think",
+  description: "Validate turns real customer interviews into AI avatars grounded in evidence, so you can test products, ads and messages before you launch.",
 };
 
 export default function Landing() {
@@ -26,15 +24,13 @@ export default function Landing() {
       <RevealController />
       <Hero />
       <main>
-        <Statement />
-        <Roadmap />
-        <Features />
-        <Price />
-        <Board />
-        <Pinned />
-        <Verdict />
-        <Faq />
-        <Cta />
+        <Problem />
+        <Workflow />
+        <UseCases />
+        <Avatars />
+        <Demo />
+        <Why />
+        <FinalCta />
       </main>
       <Footer />
     </div>

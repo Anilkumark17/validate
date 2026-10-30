@@ -1,40 +1,54 @@
 import { Mark } from "@/components/app-shell";
 import { AccountLink, PrimaryAction } from "./auth-links";
-import { RiskChip } from "./chip";
-import { Magnetic } from "./magnetic";
+import { HeroArt } from "./hero-art";
+import { HeroForm } from "./hero-form";
 
-/** The sentence is the layout. One live piece of the product stands where a word would be. */
+const LINKS = [
+  { href: "#how", label: "How it works" },
+  { href: "#roadmap", label: "Product" },
+  { href: "#price", label: "Pricing" },
+  { href: "#faq", label: "FAQ" },
+];
+
+/** Centered statement, one email field, line art underneath. */
 export function Hero() {
   return (
-    <header className="relative flex min-h-[100svh] flex-col px-[var(--margin)] pb-[var(--margin)]">
+    <header className="relative flex flex-col px-[var(--margin)]">
       <nav aria-label="Primary" className="flex items-center justify-between gap-6 py-6">
         <a href="#top" className="flex items-center gap-2 font-semibold tracking-tight" aria-label="Validate home">
           <Mark /> <span className="text-[length:var(--step-lead)]">Validate</span>
         </a>
-        <div className="flex items-center gap-6 text-[length:var(--step-body)]">
-          <a href="#roadmap" className="lp-textlink hidden sm:inline">Roadmap</a>
-          <a href="#faq" className="lp-textlink hidden sm:inline">Questions</a>
+        <div className="flex items-center gap-5 text-[length:var(--step-small)] sm:text-[length:var(--step-body)]">
+          {LINKS.map((l) => (
+            <a key={l.href} href={l.href} className="lp-textlink hidden md:inline">{l.label}</a>
+          ))}
           <AccountLink className="lp-textlink" />
+          <a href="#how" className="lp-btn-ghost lp-btn-sm hidden sm:inline-flex">See how it works</a>
+          <PrimaryAction className="lp-btn lp-btn-sm">Start for free</PrimaryAction>
         </div>
       </nav>
 
-      <div id="top" className="flex flex-1 flex-col justify-center py-14">
-        <h1 className="lp-serif text-[clamp(2.75rem,9.4vw,11.5rem)]">
-          <span className="lp-mask"><span>Price every <RiskChip /> bet</span></span>
-          <span className="lp-mask"><span style={{ ["--d" as string]: "130ms" }}>before you build.</span></span>
+      <div id="top" className="mx-auto flex max-w-[1100px] flex-col items-center gap-9 pb-10 pt-[clamp(2.5rem,8svh,6rem)] text-center">
+        <h1 className="lp-serif text-[clamp(3rem,8.4vw,8rem)]">
+          <span className="lp-mask"><span>Where product teams</span></span>
+          <span className="lp-mask">
+            <span style={{ ["--d" as string]: "110ms" }}>
+              <span className="lp-scribble">test ideas</span> and
+            </span>
+          </span>
+          <span className="lp-mask"><span style={{ ["--d" as string]: "220ms" }}>make decisions.</span></span>
         </h1>
+        <p className="lp-up lp-soft max-w-[46ch] text-[length:var(--step-lead)] leading-snug" style={{ ["--d" as string]: "420ms" }}>
+          Validate shows which roadmap bets rest on a guess, runs the customer interviews that test them, and keeps the evidence for every decision.
+        </p>
+        <div className="lp-up w-full" style={{ ["--d" as string]: "500ms" }}>
+          <HeroForm />
+          <p className="lp-soft mt-4 text-[length:var(--step-small)]">Free to start. No card needed.</p>
+        </div>
       </div>
 
-      <div className="grid items-end gap-8 md:grid-cols-12">
-        <p className="lp-up max-w-[40ch] text-[length:var(--step-lead)] leading-snug md:col-span-6" style={{ ["--d" as string]: "500ms" }}>
-          Your roadmap is a stack of bets. Validate shows which ones rest on a guess, sends you to the customers who can prove it, and keeps the evidence for every decision.
-        </p>
-        <div className="lp-up flex flex-wrap items-center gap-x-7 gap-y-4 md:col-span-6 md:justify-end" style={{ ["--d" as string]: "560ms" }}>
-          <Magnetic>
-            <PrimaryAction className="lp-btn" />
-          </Magnetic>
-          <a href="#roadmap" className="lp-textlink font-medium">Watch a roadmap get priced</a>
-        </div>
+      <div className="lp-up -mx-[var(--margin)] overflow-hidden" style={{ ["--d" as string]: "650ms" }}>
+        <HeroArt />
       </div>
     </header>
   );
