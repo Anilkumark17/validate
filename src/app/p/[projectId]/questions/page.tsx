@@ -7,6 +7,7 @@ import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { PageState, Skeleton } from "@/components/app-shell";
 import { RiskBadge } from "@/components/board/badges";
+import { RegenerateButton } from "@/components/board/regenerate-button";
 import { ProjectHeader } from "@/components/project-nav";
 import { Guide, GuideView, useAsked } from "@/components/questions/guide-view";
 import { QuestionRow } from "@/components/questions/question-row";
@@ -65,7 +66,9 @@ function Questions() {
 
   return (
     <main className="max-w-4xl">
-      <ProjectHeader projectId={projectId} />
+      <ProjectHeader projectId={projectId}>
+        <RegenerateButton projectId={projectId} />
+      </ProjectHeader>
       <Tabs defaultValue="guides">
         <TabsList className="mb-5" aria-label="Question views">
           <TabsTrigger value="guides" className="flex-none px-4">Interview guides</TabsTrigger>

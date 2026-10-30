@@ -3,6 +3,7 @@ import { NEAR_DUPLICATE, normalizeKey, similarity, type Status } from "@/lib/boa
 import { generationOutputSchema, type GenerationOutput } from "@/lib/board/schemas";
 import { db, schema } from "../db";
 import { selectExamples } from "./examples";
+import { generateExtras } from "./extras";
 import { glmJson } from "./glm";
 import { buildGenerationPrompt, type PromptProject } from "./prompts";
 
@@ -10,7 +11,7 @@ const { generationRun, stakeholder, assumption, assumptionStakeholder, project, 
 type Run = typeof generationRun.$inferSelect;
 
 /** A run that never finished (server restarted mid run) is closed after this long so retry works. */
-const STALE_MS = 6 * 60_000;
+const STALE_MS = 12 * 60_000;
 
 const g = globalThis as unknown as { __activeRuns?: Set<string> };
 const active = (g.__activeRuns ??= new Set());
@@ -41,6 +42,20 @@ export async function latestRun(projectId: string, kind?: "initial" | "refine"):
   return r ?? null;
 }
 
+/** The run that is still going for this project, if any. A run that never finished is closed first. */
+export async function findBusy(projectId: string): Promise<Run | null> {
+  await db()
+    .update(generationRun)
+    .set({ status: "failed", error: "The run did not finish (server restarted or timed out). Retry generation.", finishedAt: new Date() })
+    .where(and(eq(generationRun.projectId, projectId), inArray(generationRun.status, ["pending", "running"]), lt(generationRun.createdAt, new Date(Date.now() - STALE_MS))));
+  const [busy] = await db()
+    .select()
+    .from(generationRun)
+    .where(and(eq(generationRun.projectId, projectId), inArray(generationRun.status, ["pending", "running"])))
+    .limit(1);
+  return busy ?? null;
+}
+
 /**
  * Creates a run, or returns the one that already covers this request:
  * the same idempotency key, a run that is still going, or (initial only) a completed initial run.
@@ -51,16 +66,7 @@ export async function startRun(
   input: unknown,
   idempotencyKey: string,
 ): Promise<{ run: Run; started: boolean }> {
-  await db()
-    .update(generationRun)
-    .set({ status: "failed", error: "The run did not finish (server restarted or timed out). Retry generation.", finishedAt: new Date() })
-    .where(and(eq(generationRun.projectId, projectId), inArray(generationRun.status, ["pending", "running"]), lt(generationRun.createdAt, new Date(Date.now() - STALE_MS))));
-
-  const [busy] = await db()
-    .select()
-    .from(generationRun)
-    .where(and(eq(generationRun.projectId, projectId), inArray(generationRun.status, ["pending", "running"])))
-    .limit(1);
+  const busy = await findBusy(projectId);
   if (busy) return { run: busy, started: false };
 
   if (kind === "initial") {
@@ -126,7 +132,9 @@ export async function executeRun(runId: string): Promise<void> {
       { system: prompt.system, user: prompt.user, maxTokens: 8000 },
     );
     attempts = out.attempts;
+    const extras = (input as { extras?: boolean }).extras === true;
     const result = await persist({
+      hold: extras,
       run,
       out: out.data,
       audienceUnconfirmed: !(p.audienceState === "confirmed" || p.audienceState === "detected"),
@@ -136,13 +144,21 @@ export async function executeRun(runId: string): Promise<void> {
       examples: examples.map((e) => e.id),
       attempts,
     });
-    void result;
+    if (extras) {
+      const more = await generateExtras(run.projectId, p);
+      await db()
+        .update(generationRun)
+        .set({ status: "completed", result: { ...result, extras: more }, finishedAt: new Date() })
+        .where(eq(generationRun.id, runId));
+    }
   } catch (e) {
     await fail(runId, e instanceof Error ? e.message : String(e), attempts);
   }
 }
 
 async function persist(a: {
+  /** keep the run open: the caller finishes it after the follow-up steps */
+  hold: boolean;
   run: Run;
   out: GenerationOutput;
   audienceUnconfirmed: boolean;
@@ -262,14 +278,14 @@ async function persist(a: {
     await tx
       .update(generationRun)
       .set({
-        status: "completed",
+        status: a.hold ? "running" : "completed",
         summary: out.generationSummary,
         result: res,
         model: a.model,
         examples: a.examples,
         attempts: a.attempts,
         error: null,
-        finishedAt: new Date(),
+        finishedAt: a.hold ? null : new Date(),
       })
       .where(eq(generationRun.id, run.id));
     return res;

@@ -284,6 +284,31 @@ export const assumptionDecision = pgTable(
   ],
 );
 
+export const personaStatus = pgEnum("persona_status", ["draft", "approved"]);
+
+/** An AI customer character: a card and a system prompt. Drafts need a person's approval before use. */
+export const persona = pgTable(
+  "persona",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    jtbdSummary: text("jtbd_summary").notNull().default(""),
+    mindsetSummary: text("mindset_summary").notNull().default(""),
+    segmentHints: text("segment_hints").array().notNull().default([]),
+    systemPrompt: text("system_prompt").notNull().default(""),
+    status: personaStatus("status").notNull().default("draft"),
+    /** ai_generated drafts are replaced when the project is regenerated; user_created ones never are */
+    source: creationSource("source").notNull().default("user_created"),
+    /** how many real customers the persona was built from */
+    sourceCustomerCount: integer("source_customer_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("persona_project_idx").on(t.projectId)],
+);
+
 /** Question bank: interview guide in the five act structure (docs/SystemPrompts/rightQuestions.md). */
 export const interviewGuide = pgTable(
   "interview_guide",

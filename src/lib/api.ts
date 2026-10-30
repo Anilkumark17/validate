@@ -37,6 +37,22 @@ export interface Project {
   context?: string;
 }
 
+export interface Persona {
+  id: string;
+  projectId: string;
+  name: string;
+  summary: string;
+  jtbdSummary: string;
+  mindsetSummary: string;
+  segmentHints: string[];
+  systemPrompt: string;
+  status: "draft" | "approved";
+  source: "ai_generated" | "user_created";
+  sourceCustomerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ContextEntry {
   id: string;
   projectId: string;

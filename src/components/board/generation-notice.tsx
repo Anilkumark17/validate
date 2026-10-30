@@ -30,7 +30,7 @@ export function GenerationNotice({ projectId }: { projectId: string }) {
     return (
       <div className="flex items-center gap-2 rounded-lg border bg-card p-3 text-sm" role="status">
         <Loader2 className="size-4 animate-spin" aria-hidden />
-        {run!.kind === "refine" ? "Refining assumptions with the new context…" : "Generating assumptions and stakeholder roles. This usually takes up to a minute."}
+        {run!.kind === "refine" ? "Refining assumptions with the new context…" : run!.input?.extras ? "Regenerating assumptions, stakeholder roles, personas and interview guides. This can take a few minutes." : "Generating assumptions and stakeholder roles. This usually takes up to a minute."}
       </div>
     );
   }

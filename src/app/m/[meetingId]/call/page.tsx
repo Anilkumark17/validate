@@ -9,6 +9,8 @@ import { useParams, useRouter } from "next/navigation";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Brand, PageState, ThemeToggle } from "@/components/app-shell";
+import { CallQuestions } from "@/components/call-questions";
+import type { Guide } from "@/components/questions/guide-view";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/form";
 import { api, ApiRequestError, type MeetingDetail, type Segment } from "@/lib/api";
@@ -484,6 +486,14 @@ export default function CallPage() {
   const { data, isLoading, error } = useQuery({ queryKey: key, queryFn: () => api<MeetingDetail>(`/meetings/${meetingId}`) });
   const me = useMe();
   const projectId = data?.meeting.projectId;
+  // Only the project owner can read guides (others get 404), so the Questions tab appears for the host alone.
+  const guides = useQuery({
+    queryKey: ["guides", projectId],
+    queryFn: () => api<Guide[]>(`/projects/${projectId}/guides`),
+    enabled: !!me.data && !!projectId,
+    retry: false,
+  });
+  const [tab, setTab] = useState<"transcript" | "questions">("transcript");
   const leave = () => router.replace(me.data ? `/p/${projectId}/meetings` : `/join/${data?.meeting.inviteCode ?? ""}`);
   const ended = data?.meeting.state === "ended";
 
@@ -675,7 +685,28 @@ export default function CallPage() {
             </LiveKitRoom>
           )}
         </div>
-        <TranscriptPanel segments={data.segments} interim={Object.values(interim)} />
+        <div className="flex min-h-0 flex-col border-l bg-card">
+          {guides.data && (
+            <div role="tablist" aria-label="Side panel" className="flex shrink-0 border-b text-sm">
+              {(["transcript", "questions"] as const).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={`flex-1 px-3 py-2.5 font-medium ${tab === t ? "border-b-2 border-foreground" : "text-muted-foreground"}`}
+                >
+                  {t === "transcript" ? "Transcript" : "Questions"}
+                </button>
+              ))}
+            </div>
+          )}
+          {guides.data && tab === "questions" ? (
+            <CallQuestions projectId={data.meeting.projectId} guides={guides.data} />
+          ) : (
+            <TranscriptPanel segments={data.segments} interim={Object.values(interim)} />
+          )}
+        </div>
       </div>
     </div>
   );

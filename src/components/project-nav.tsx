@@ -1,6 +1,6 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Columns3, FileText, History, LayoutDashboard, MessagesSquare, StickyNote, Users, Video } from "lucide-react";
+import { ChevronLeft, Columns3, FileText, History, LayoutDashboard, MessagesSquare, StickyNote, UserRound, Users, Video } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PageHeader, Shell, type NavGroup } from "@/components/shell";
@@ -22,6 +22,7 @@ function groups(id: string): NavGroup[] {
         { href: `${base}/meetings`, label: "Meetings", icon: Video },
         { href: `${base}/questions`, label: "Question bank", icon: MessagesSquare },
         { href: `${base}/stakeholders`, label: "Stakeholders", icon: Users },
+        { href: `${base}/personas`, label: "Personas", icon: UserRound },
         { href: `${base}/evidence`, label: "Evidence", icon: FileText },
       ],
     },
@@ -88,6 +89,7 @@ const PAGES: Record<string, { title: string; description: string }> = {
   stakeholders: { title: "Stakeholders", description: "Who can confirm or refute your assumptions." },
   decisions: { title: "Decision history", description: "Every status change, newest first." },
   questions: { title: "Question bank", description: "Ask about past behavior, never what people would do." },
+  personas: { title: "Personas", description: "AI customer characters. Drafts need your approval." },
   context: { title: "Context", description: "Background for this project. Only you can see it." },
 };
 

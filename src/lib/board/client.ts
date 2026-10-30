@@ -48,6 +48,7 @@ export interface Run {
   id: string;
   kind: "initial" | "refine";
   status: "pending" | "running" | "completed" | "failed";
+  input?: { extras?: boolean } | null;
   error: string | null;
   summary: string | null;
   attempts: number;
@@ -60,6 +61,8 @@ export interface Run {
     skipped: { assumptions: number; stakeholders: number };
     suggestedChanges: { assumptionId: string; title: string; field: string; proposed: string; reason: string }[];
     possiblyObsolete: { assumptionId: string; title: string; reason: string }[];
+    /** present on a regeneration */
+    extras?: { personas: number; guides: number; failed: string[] };
   } | null;
 }
 
