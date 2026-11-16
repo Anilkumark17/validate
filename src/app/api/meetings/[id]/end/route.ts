@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db, schema } from "@/server/db";
 import { handle } from "@/server/http";
 import { requireMeetingHost } from "@/server/auth";
+import { closeRoom } from "@/server/livekit";
 import { publish } from "@/server/sse";
 
 export const dynamic = "force-dynamic";
@@ -17,5 +18,6 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
       .where(eq(schema.meeting.id, id));
   }
   publish(m.projectId, "meeting.ended", { meetingId: id });
+  await closeRoom(id);
   return NextResponse.json({ ok: true });
 });

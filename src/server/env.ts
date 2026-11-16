@@ -14,6 +14,8 @@ const schema = z.object({
   GLM_MODEL: z.string().default("glm-4.6"),
   /** Used when the main model keeps failing. */
   GLM_MODEL_FALLBACK: z.string().default("glm-4.5-flash"),
+  /** Provider tokens-per-minute limit per model (Groq free tier: 8000). 0 turns pacing off. */
+  GLM_TPM: z.coerce.number().int().min(0).default(0),
   LIVEKIT_URL: z.string().default(""),
   LIVEKIT_API_KEY: z.string().default(""),
   LIVEKIT_API_SECRET: z.string().default(""),

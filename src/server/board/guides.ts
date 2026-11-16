@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { guideOutputSchema, type GuideOutput } from "@/lib/board/schemas";
 import { db, schema } from "../db";
 import { ApiError } from "../http";
@@ -13,7 +13,7 @@ const MAX_ASSUMPTIONS = 4;
  * Question bank: builds a five act interview guide for one stakeholder role from its riskiest linked
  * assumptions, using the coaching prompt in docs/SystemPrompts/rightQuestions.md.
  */
-export async function createGuide(projectId: string, stakeholderId: string) {
+async function draftGuide(projectId: string, stakeholderId: string, signal?: AbortSignal) {
   const s = await requireStakeholder(projectId, stakeholderId);
   const linked = await db()
     .select({ a: schema.assumption })
@@ -33,7 +33,8 @@ export async function createGuide(projectId: string, stakeholderId: string) {
   });
   let out: { data: GuideOutput; model: string };
   try {
-    out = await glmJson(guideOutputSchema(keyed.map((k) => k.key)), { system: prompt.system, user: prompt.user, maxTokens: 8000 });
+    out = await glmJson(guideOutputSchema(keyed.map((k) => k.key)), { system: prompt.system, user: prompt.user, maxTokens: 8000, signal });
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   } catch (e) {
     if (e instanceof GlmError) throw new ApiError(502, "guide_failed", e.message);
     throw e;
@@ -44,16 +45,30 @@ export async function createGuide(projectId: string, stakeholderId: string) {
     assumptionsToTest: out.data.assumptionsToTest.map((x) => ({ ...x, assumptionId: idOf.get(x.assumptionId) ?? x.assumptionId })),
     acts: out.data.acts.map((act) => ({ ...act, questions: act.questions.map((q) => ({ ...q, assumptionId: q.assumptionId ? (idOf.get(q.assumptionId) ?? null) : null })) })),
   };
-  const [row] = await db()
-    .insert(schema.interviewGuide)
-    .values({
-      projectId,
-      stakeholderId: s.id,
-      title: `Interview guide: ${s.roleName}`,
-      assumptionIds: keyed.map((k) => k.a.id),
-      content,
-      model: out.model,
-    })
-    .returning();
+  return {
+    projectId,
+    stakeholderId: s.id,
+    title: `Interview guide: ${s.roleName}`,
+    assumptionIds: keyed.map((k) => k.a.id),
+    content,
+    model: out.model,
+  };
+}
+
+/** Adds a guide. An older guide for the same role is left as it was. */
+export async function createGuide(projectId: string, stakeholderId: string) {
+  const values = await draftGuide(projectId, stakeholderId);
+  const [row] = await db().insert(schema.interviewGuide).values(values).returning();
+  return row!;
+}
+
+/** Writes one guide and removes the previous guides for that role in the same transaction. */
+export async function replaceGuide(projectId: string, stakeholderId: string, signal?: AbortSignal) {
+  const values = await draftGuide(projectId, stakeholderId, signal);
+  if (signal?.aborted) return null;
+  const [row] = await db().transaction(async (tx) => {
+    await tx.delete(schema.interviewGuide).where(and(eq(schema.interviewGuide.projectId, projectId), eq(schema.interviewGuide.stakeholderId, stakeholderId)));
+    return tx.insert(schema.interviewGuide).values(values).returning();
+  });
   return row!;
 }

@@ -1,7 +1,7 @@
 const POINTS = [
-  { title: "Interview-grounded avatars", body: "Every profile is built from what participants actually said." },
-  { title: "Continuous understanding", body: "Each new interview adds to what you know, instead of starting a new document." },
-  { title: "Conversations with AI customers", body: "Ask follow-up questions long after the interview ended." },
+  { title: "Interview-grounded profiles", body: "Every profile is built from what participants actually said." },
+  { title: "Evidence that compounds", body: "Each new interview adds to what you know, instead of starting a new document." },
+  { title: "Questions for AI customers", body: "Ask follow-up questions long after the interview ended." },
   { title: "Faster concept and campaign testing", body: "Get a first read on a message in minutes, then confirm it with real people." },
   { title: "Insights tied to evidence", body: "Trace any insight back to the interview it came from." },
 ];
@@ -10,7 +10,7 @@ export function Why() {
   return (
     <section id="faq" aria-labelledby="why-h" className="mx-auto grid max-w-[1600px] gap-12 px-[var(--margin)] py-24 md:grid-cols-12 md:py-32">
       <h2 id="why-h" className="lp-serif text-[length:var(--step-head)] md:sticky md:top-24 md:col-span-5 md:self-start" data-reveal>
-        Move from customer conversations to customer intelligence.
+        Move from customer conversations to evidence-backed decisions.
       </h2>
       <ul className="md:col-span-7">
         {POINTS.map((p, i) => (

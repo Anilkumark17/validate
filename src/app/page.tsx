@@ -14,8 +14,8 @@ import { Why } from "@/components/landing/why";
 import { Workflow } from "@/components/landing/workflow";
 
 export const metadata: Metadata = {
-  title: "Validate: simulate how your customers think",
-  description: "Validate turns real customer interviews into AI avatars grounded in evidence, so you can test products, ads and messages before you launch.",
+  title: "Validate: turn customer interviews into evidence-backed decisions",
+  description: "Validate turns real customer interviews into evidence-grounded customer profiles you can question and simulate, so product teams can test ideas, pricing and messaging before launch.",
 };
 
 export default function Landing() {

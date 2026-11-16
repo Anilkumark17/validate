@@ -74,7 +74,7 @@ Status transitions are a table (`ALLOWED`) and a function (`checkMove`) in [src/
 - Transient HTTP failures (429, 5xx) retry with backoff and `Retry-After`; permanent 4xx fail fast; repeated failures fall back to a second model (`GLM_MODEL_FALLBACK`).
 
 ### Idempotent, restart-safe generation
-`generation_run` records every attempt with an idempotency key (unique per project). A double click, a retry, or a second tab returns the existing run. Only one run per project is active; a completed initial run is returned instead of regenerating. Runs stuck for over 6 minutes (server restart) are closed as failed so retry works. Writes happen in one transaction with `ON CONFLICT DO NOTHING` on the dedupe keys, plus a Jaccard word-similarity check (threshold 0.8) so reworded repeats of an existing assumption are skipped. An existing user-edited stakeholder is kept untouched and linked to, never overwritten. The run stores model, examples used, attempts, and created and skipped counts.
+`generation_run` records every attempt with an idempotency key (unique per project and kind). A double click, a retry, or a second tab returns the existing run. Only one run per project is active. A completed initial run is returned instead of regenerating, unless the call is a regeneration. Runs stuck for over 12 minutes (server restart) are closed as failed so retry works. A failed run with the same key is reopened. Writes happen in one transaction with `ON CONFLICT DO NOTHING` on the dedupe keys, plus a Jaccard word-similarity check (threshold 0.8) so reworded repeats of an existing assumption are skipped and linked to the existing row. An existing user-edited stakeholder is kept untouched and linked to, never overwritten. The run stores model, examples used, attempts, and created and skipped counts.
 
 ### Prompt design
 Prompts have fixed sections: project, owner context, examples, existing items (so they are not repeated), refinement, output schema, task. Few-shot examples are chosen deterministically by keyword match from three domains, and the prompt states they show structure only and are not research about this project's customers. They are tested to satisfy the production schema, so examples cannot drift from validation.
@@ -89,16 +89,19 @@ scrypt password hashing and an HMAC-signed httpOnly session cookie (7 days). Gue
 Neon is reached with `@neondatabase/serverless` over WebSocket because port 5432 was blocked on the dev network. Because each query costs a round trip, hot paths were cut down: the access check is one query, and segment index assignment plus insert is one statement with retry on the unique constraint.
 
 ### Speech to text: server first, browser as safety net
-Path taken: Gemini, Groq Whisper (measured: pause-based chunking gave 2.6% word error rate against 9 to 10% for fixed chunks), GLM ASR, browser only, and finally Sarvam with browser fallback. The browser captures 16 kHz audio in an AudioWorklet, cuts at pauses (2 to 8 s), and sends chunks through a bounded upload queue that retries with the same id and merges rather than drops audio when backed up. Fatal Sarvam errors (no key, 4xx) switch that speaker to browser speech at once; two consecutive failures do too.
+Path taken: Gemini, Groq Whisper (measured: pause-based chunking gave 2.6% word error rate against 9 to 10% for fixed chunks), GLM ASR, browser only, and finally Sarvam with browser fallback. The browser captures 16 kHz audio in an AudioWorklet, cuts at pauses (2 to 8 s), and sends chunks through an upload queue that retries with the same id. When the queue falls behind it merges waiting audio, up to the server's 30 second limit. Audio that cannot be merged is kept and sent later. It is not dropped. Fatal Sarvam errors (no key, 4xx) switch that speaker to browser speech at once; two consecutive failures do too. A chunk that uses up its retries is still lost.
 
 ### Transcript delivery
-The server saves a line first, then broadcasts it on the LiveKit data channel (topic `transcript`). Postgres stays the source of truth and a failed broadcast never loses a saved line. The speaker's own screen uses the response of the save, not the broadcast. Draft text goes browser to browser (topic `interim`) and is never stored. SSE carries only meeting lifecycle (updated, ended). Sending finals directly from the browser would be faster but would let a client forge transcript lines.
+The server saves a line first, then broadcasts a wake-up on the LiveKit data channel (topic `transcript`). Other participants refetch the meeting from Postgres. They do not render the payload, so a guest cannot put a fake line on someone else's screen. The speaker's own screen uses the response of the save. The speaker name on a saved line is the host's account name, or the name the guest used when they joined, stored in the signed guest cookie. A later request cannot change it. Draft text goes browser to browser (topic `interim`) and is never stored. SSE carries only meeting lifecycle (updated, ended). Fallback speech still sends the recognized text from the browser, attributed to that join name.
 
 ### Correctness and ordering
 Retries with the same `clientId` return the first result (in memory, per process). Concurrent saves can finish out of order, so segments are ordered by `start_sec` then `idx`, and clients insert in that order and merge by id. A line that arrives before the first fetch is held, not dropped. Reconnect refetches from the database.
 
+### One generation at a time
+`generation_run` allows one pending or running row per project (a partial unique index, plus a transaction lock). A second click joins that run instead of starting another. Regeneration does not delete anything until the model has replied. The replace of untouched AI assumptions and roles happens in the same transaction as the insert, so a failed model call leaves the previous board in place. Personas and guides are replaced only after their own model call succeeds. A failed regenerate is retried with regenerate, which rebuilds personas and guides. A run that is still pending is launched again, so a process that died before the work started can be picked up. A run stuck for 12 minutes is marked failed on the next board load.
+
 ### Schema evolution
-Eight Drizzle migrations (0005 dropped the old assumption-tool tables and rebuilt them for the board) in [drizzle/](drizzle/). The `category` column is free text so the category list can grow without a migration. Enums are used where the set is closed (status, evidence type, interpretation).
+Nine Drizzle migrations (0005 dropped the old assumption-tool tables and rebuilt them for the board, 0009 allows one active generation per project) in [drizzle/](drizzle/). The `category` column is free text so the category list can grow without a migration. Enums are used where the set of values is closed (status, evidence type, interpretation). Run `npm run db:migrate` so 0009 is applied.
 
 ## How the pieces connect
 
@@ -124,8 +127,8 @@ Transcript path: the speaker's browser cuts audio at pauses and uploads it to `P
 | Who | Can do |
 | --- | --- |
 | Signed-out visitor | See the landing page, view an invite page, join a meeting with the invite code. App pages redirect to `/login` |
-| Host (project owner) | Everything on own projects: board, evidence, decisions, stakeholders, guides, context, meetings, ending a call |
-| Guest (joined by invite link) | Read that one meeting, send transcript lines, join its call. Cannot see the project. Access lasts 24 hours |
+| Host (project owner) | Everything on own projects: board, evidence, decisions, stakeholders, guides, context, meetings, starting and ending a call |
+| Guest (joined by invite link) | Read that one meeting, speak on its call, and have their own lines saved under the name they joined with. Cannot start or end the meeting, and cannot see the project. Access lasts 24 hours |
 | Other signed-in user | No access to someone else's project (404) |
 
 ## Setup
@@ -179,7 +182,7 @@ npm run dev            # http://localhost:3000
 ## Using it
 
 1. Sign up and create a project. Describe the idea and add context notes.
-2. Confirm the audience (or skip), then generate assumptions and stakeholders.
+2. Confirm the audience (or skip). Then write what you already know and select the aspects the assumptions should cover (target customer, user flow, user behavior, current flow, testing the app, or your own). Skip is allowed. Then generate assumptions and stakeholders.
 3. On the Board, review assumptions, edit them, and drag the ones you will test to Ready to Validate.
 4. Generate an interview guide for a stakeholder from the Questions page.
 5. Create a meeting, share the invite link, hold the interview, and read the transcript.
@@ -265,17 +268,30 @@ docs/                                   decision log, diagrams, system prompts
 - **GLM client:** retry on transient errors, no retry on permanent errors, model fallback, re-ask on malformed JSON, bounded attempts, key never leaked (fetch and sleep are injected).
 - **Audio:** WAV header, pause-based chunking loses no audio, upload queue ordering and retry, ordered segment insert.
 
+## How reliable it is
+
+These hold after the checks above, including when a client skips the UI:
+
+- Only a person records evidence. Only `POST /assumptions/<id>/move` changes an assumption's status, and it runs `checkMove`, locks the row, and writes the decision in the same transaction.
+- Risk is a generated column. Composite foreign keys keep an assumption, stakeholder, evidence row, and decision in the same project.
+- One project has at most one active generation. A failed model call does not delete the board. Regeneration replaces untouched AI rows only after the new rows are ready to commit.
+- A meeting clock starts only when the host connects, and a second start does not move `startedAt`. Ending the meeting deletes the LiveKit room. A new token is refused once the meeting has ended. Non-exempt tokens last 45 minutes, which covers the 20 minute cap.
+- Saved transcript lines are written before anyone else is told. Other screens load them from Postgres. The speaker name is taken from the account or the signed join cookie, not from the body of the save request.
+- Queued interview audio is not discarded to make room. It is merged when that stays under 30 seconds, and otherwise it waits.
+- Passwords are scrypt. Session and guest cookies are HMAC-signed, httpOnly, and compared in constant time. Non-owners get 404 on a project. Signup does not say whether an email is registered.
+
 ## Known limitations
 
-- **No end-to-end tests.** API routes and the database layer are verified by hand; there are no integration or browser tests.
-- **In-memory state is per process:** rate limits, transcript idempotency and the "active run" set. With several instances or after a restart, a retry could duplicate a transcript line or exceed a limit. Generation de-duplication is in the database and is safe.
-- **Generation runs in the web process** (fire and forget, then poll). A restart mid-run loses it; it is marked failed after 6 minutes and can be retried. A real job queue would be the next step.
-- **Fallback speech mode** needs Chrome or Edge, and in Chrome audio goes to Google. A chunk that fails its last Sarvam retry is lost.
-- **Delivery delay:** transcript lines reach others about one to two seconds after saving, because the LiveKit server call takes about a second.
-- **Speaker names** come from the browser and are not verified. Sarvam gives no diarization here.
-- **Auth is minimal:** no password reset, email verification, session revocation, or OAuth. Sign-up is open.
-- **Model quality is not guaranteed.** Validation catches structure, leading questions and invented statistics, but not whether an assumption is actually insightful.
+- **No end-to-end tests.** API routes and the database layer are verified by hand; there are no integration or browser tests. The unit tests cover the board rules, the model guards, and the audio queue.
+- **Generation still runs in the web process** (the request returns 202, then the work continues). A restart during the model call leaves the run in progress until it is marked failed, 12 minutes after it was created. Retry works. A job queue would survive restarts.
+- **Rate limits and transcript retry memory are per process.** Two servers do not share them. The address used for a limit is `X-Real-IP` when the proxy sets it, otherwise the last `X-Forwarded-For` hop. The database, not memory, stops two generations of the same project.
+- **Fallback speech** needs Chrome or Edge, and in Chrome that audio goes to Google. The text of a fallback line is whatever that browser submits. It is stored under the speaker's join name. A chunk that uses up its Sarvam retries is lost.
+- **Interim captions** are sent from browser to browser and are not saved. They can be spoofed for the few seconds they are on screen. Final lines cannot.
+- **Delivery delay:** other people see a saved line after the LiveKit wake-up and a refetch, about one to two seconds.
+- **No speaker diarization.** Sarvam does not separate voices in one audio stream. Each browser sends its own audio.
+- **Auth is minimal:** no password reset, email verification, session revocation, or OAuth. Sign-up is open. A deleted account's cookie no longer counts as the host, because the user row is loaded.
+- **Model quality is not guaranteed.** Validation catches structure, leading questions, and invented statistics, but not whether an assumption is actually insightful.
 - **Context is text only,** no files or sharing with guests.
-- **Unused leftovers** from earlier versions remain: some columns (`persona`, `voice`, meeting job and token counters) and some npm packages (LangChain).
+- **Leftover columns** on `project` (`persona`, `voice`) and some meeting job counters are unused. The personas page uses the `persona` table. Some npm packages (LangChain) are unused.
 - **Old data:** projects created before accounts existed have no owner and are invisible until `owner_id` is set.
 - **Sarvam cost and rate limits** were not verified.

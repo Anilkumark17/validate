@@ -45,9 +45,20 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
   };
 }
 
+/** Address the nearest proxy added. The left-most X-Forwarded-For value is whatever the client sent. */
+function clientAddress(req: Request): string {
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const hops = (req.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return hops.at(-1) ?? "local";
+}
+
 const hits = new Map<string, number[]>();
 export function rateLimit(req: Request, bucket: string, max = 120, windowMs = 60_000) {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  const ip = clientAddress(req);
   const key = `${bucket}:${ip}`;
   const now = Date.now();
   const arr = (hits.get(key) ?? []).filter((t) => now - t < windowMs);

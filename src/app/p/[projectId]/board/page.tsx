@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PageState } from "@/components/app-shell";
+import { AssignDialog } from "@/components/board/assign-dialog";
 import { AssumptionDialog } from "@/components/board/assumption-dialog";
 import { RiskBadge } from "@/components/board/badges";
 import { GenerationNotice } from "@/components/board/generation-notice";
@@ -14,6 +15,7 @@ import { NewAssumptionDialog } from "@/components/board/new-assumption-dialog";
 import { RefineDialog } from "@/components/board/refine-dialog";
 import { ProjectHeader } from "@/components/project-nav";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { Input, Select } from "@/components/ui/form";
 import { RequireAuth } from "@/lib/auth";
 import { boardKey, refreshBoard, useBoard, type BoardAssumption, type BoardData, type BoardStakeholder } from "@/lib/board/client";
@@ -35,11 +37,13 @@ function Card({
   stakeholders,
   onOpen,
   overlay,
+  showStatus,
 }: {
   a: BoardAssumption;
   stakeholders: Map<string, BoardStakeholder>;
   onOpen: () => void;
   overlay?: boolean;
+  showStatus?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: a.id, data: { status: a.status } });
   const names = a.stakeholderIds.map((id) => stakeholders.get(id)?.roleName).filter(Boolean) as string[];
@@ -75,24 +79,24 @@ function Card({
         )}
       </div>
       <p className="mt-1.5 truncate pl-5 text-xs text-muted-foreground">
-        {categoryLabel(a.category)}
+        {showStatus ? STATUS_LABEL[a.status] : categoryLabel(a.category)}
         {names.length > 0 && ` · ${names.join(", ")}`}
       </p>
     </article>
   );
 }
 
-function Column({ status, items, children }: { status: Status; items: number; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+function Column({ dropId, label, items, children, marked }: { dropId: string; label: string; items: number; children: React.ReactNode; marked?: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: dropId });
   return (
     <section
       ref={setNodeRef}
       className={cn("flex w-72 shrink-0 flex-col rounded-lg bg-muted/70 p-2", isOver && "ring-2 ring-chart")}
-      aria-label={`${STATUS_LABEL[status]}, ${items} assumptions`}
+      aria-label={`${label}, ${items} assumptions`}
     >
       <h2 className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium">
-        {status === "validated" && <span className="size-2 rounded-full bg-chart" aria-hidden />}
-        {STATUS_LABEL[status]}
+        {marked && <span className="size-2 rounded-full bg-chart" aria-hidden />}
+        <span className="min-w-0 truncate">{label}</span>
         <span className="num ml-auto text-xs font-normal text-muted-foreground">{items}</span>
       </h2>
       <div className="flex min-h-16 flex-1 flex-col gap-2">{children}</div>
@@ -109,6 +113,7 @@ function Board() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [moving, setMoving] = useState<{ id: string; to: Status } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [group, setGroup] = useState<"status" | "stakeholder">("status");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
 
   const stakeholderMap = useMemo(() => new Map((data?.stakeholders ?? []).map((s) => [s.id, s])), [data?.stakeholders]);
@@ -148,12 +153,34 @@ function Board() {
     else quickMove.mutate({ a, to });
   };
 
+  const place = useMutation({
+    mutationFn: ({ a, stakeholderIds }: { a: BoardAssumption; stakeholderIds: string[] }) => api(`/projects/${projectId}/assumptions/${a.id}/stakeholders`, { method: "PUT", json: { ids: stakeholderIds } }),
+    onMutate: async ({ a, stakeholderIds }) => {
+      await qc.cancelQueries({ queryKey: boardKey(projectId) });
+      const prev = qc.getQueryData<BoardData>(boardKey(projectId));
+      qc.setQueryData<BoardData>(boardKey(projectId), (old) => old && { ...old, assumptions: old.assumptions.map((x) => (x.id === a.id ? { ...x, stakeholderIds } : x)) });
+      return { prev };
+    },
+    onError: (e: Error, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(boardKey(projectId), ctx.prev);
+      toast.error(e.message);
+    },
+    onSettled: () => refreshBoard(qc, projectId),
+  });
+
   const byId = (id: string | null) => data?.assumptions.find((a) => a.id === id) ?? null;
   const onDragEnd = (e: DragEndEvent) => {
     setDragId(null);
     const a = byId(String(e.active.id));
-    const to = e.over?.id as Status | undefined;
-    if (a && to && (STATUSES as readonly string[]).includes(to)) requestMove(a, to);
+    const over = e.over?.id ? String(e.over.id) : "";
+    if (!a || !over) return;
+    if (group === "status" && (STATUSES as readonly string[]).includes(over)) requestMove(a, over as Status);
+    if (group === "stakeholder" && over.startsWith("role:")) {
+      const target = over.slice("role:".length);
+      const stakeholderIds = target === "unassigned" ? [] : [target, ...a.stakeholderIds.filter((id) => id !== target)].slice(0, 2);
+      if (stakeholderIds.join() === a.stakeholderIds.join()) return;
+      place.mutate({ a, stakeholderIds });
+    }
   };
 
   if (isLoading || error || !data) {
@@ -180,6 +207,7 @@ function Board() {
   return (
     <main>
       <ProjectHeader projectId={projectId}>
+        <AssignDialog projectId={projectId} assumptions={data.assumptions} stakeholders={data.stakeholders} />
         <RefineDialog projectId={projectId} />
         <NewAssumptionDialog projectId={projectId} stakeholders={data.stakeholders} />
       </ProjectHeader>
@@ -213,23 +241,43 @@ function Board() {
             {select("Status", "status", [["all", "All statuses"], ...STATUSES.map((s) => [s, STATUS_LABEL[s]])], "w-52")}
           </div>
         )}
+        <div className="flex gap-1" role="group" aria-label="Group assumptions">
+          {(["status", "stakeholder"] as const).map((g) => (
+            <Button key={g} size="sm" variant={group === g ? "secondary" : "ghost"} aria-pressed={group === g} onClick={() => setGroup(g)}>
+              {g === "status" ? "By status" : "By stakeholder"}
+            </Button>
+          ))}
+        </div>
         <DndContext sensors={sensors} onDragStart={(e: DragStartEvent) => setDragId(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragId(null)}>
           <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-8 sm:px-8">
-            {STATUSES.map((s) => {
-              const items = visible.filter((a) => a.status === s);
-              return (
-                <Column key={s} status={s} items={items.length}>
-                  {items.map((a) => (
-                    <Card key={a.id} a={a} stakeholders={stakeholderMap} onOpen={() => setOpenId(a.id)} />
-                  ))}
-                  {items.length === 0 && (
-                    <p className="grid h-10 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">{isFiltered(filters) ? "No matches" : "Nothing here"}</p>
-                  )}
-                </Column>
-              );
-            })}
+            {group === "status"
+              ? STATUSES.map((s) => {
+                  const items = visible.filter((a) => a.status === s);
+                  return (
+                    <Column key={s} dropId={s} label={STATUS_LABEL[s]} items={items.length} marked={s === "validated"}>
+                      {items.map((a) => (
+                        <Card key={a.id} a={a} stakeholders={stakeholderMap} onOpen={() => setOpenId(a.id)} />
+                      ))}
+                      {items.length === 0 && <p className="grid h-10 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">{isFiltered(filters) ? "No matches" : "Nothing here"}</p>}
+                    </Column>
+                  );
+                })
+              : [
+                  { id: "unassigned", label: "Unassigned" },
+                  ...data.stakeholders.map((s) => ({ id: s.id, label: s.roleName })),
+                ].map((col) => {
+                  const items = visible.filter((a) => (a.stakeholderIds.find((id) => stakeholderMap.has(id)) ?? "unassigned") === col.id);
+                  return (
+                    <Column key={col.id} dropId={`role:${col.id}`} label={col.label} items={items.length}>
+                      {items.map((a) => (
+                        <Card key={a.id} a={a} stakeholders={stakeholderMap} onOpen={() => setOpenId(a.id)} showStatus />
+                      ))}
+                      {items.length === 0 && <p className="grid h-10 place-items-center rounded-md border border-dashed text-xs text-muted-foreground">Drop an assumption here</p>}
+                    </Column>
+                  );
+                })}
           </div>
-          <DragOverlay>{dragId && byId(dragId) ? <Card a={byId(dragId)!} stakeholders={stakeholderMap} onOpen={() => {}} overlay /> : null}</DragOverlay>
+          <DragOverlay>{dragId && byId(dragId) ? <Card a={byId(dragId)!} stakeholders={stakeholderMap} onOpen={() => {}} overlay showStatus={group === "stakeholder"} /> : null}</DragOverlay>
         </DndContext>
       </div>
       {openA && !moving && (

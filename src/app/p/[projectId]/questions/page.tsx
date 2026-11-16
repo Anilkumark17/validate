@@ -1,9 +1,9 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Loader2, Search, Wand2 } from "lucide-react";
+import { Check, ChevronDown, Loader2, Search, Square, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 import { PageState, Skeleton } from "@/components/app-shell";
 import { RiskBadge } from "@/components/board/badges";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/form";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { RequireAuth } from "@/lib/auth";
-import { useBoard } from "@/lib/board/client";
+import { refreshBoard, useBoard, type BoardAssumption } from "@/lib/board/client";
 import { cn } from "@/lib/utils";
 
 export default function QuestionsPage() {
@@ -26,6 +26,45 @@ export default function QuestionsPage() {
         <Questions />
       </Suspense>
     </RequireAuth>
+  );
+}
+
+function AssumptionQuestions({ projectId, assumption }: { projectId: string; assumption: BoardAssumption }) {
+  const qc = useQueryClient();
+  const [running, setRunning] = useState(false);
+  const stopRef = useRef<AbortController | null>(null);
+
+  function toggle(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (running) {
+      stopRef.current?.abort();
+      return;
+    }
+    const controller = new AbortController();
+    stopRef.current = controller;
+    setRunning(true);
+    api<{ stopped?: boolean; guidesRewritten: number }>(`/projects/${projectId}/assumptions/${assumption.id}/questions`, { method: "POST", signal: controller.signal })
+      .then((r) => {
+        if (r.stopped) toast("Stopped. These questions were left as they are.");
+        else toast.success(r.guidesRewritten ? `Questions updated, and ${r.guidesRewritten} interview guide${r.guidesRewritten === 1 ? "" : "s"} rewritten.` : "Questions updated to match this assumption.");
+        refreshBoard(qc, projectId);
+        void qc.invalidateQueries({ queryKey: ["guides", projectId] });
+      })
+      .catch((e: unknown) => {
+        if (controller.signal.aborted) toast("Stopped. These questions were left as they are.");
+        else toast.error(e instanceof Error ? e.message : "Could not update the questions");
+      })
+      .finally(() => {
+        stopRef.current = null;
+        setRunning(false);
+      });
+  }
+
+  return (
+    <Button size="sm" variant={running ? "destructive" : "outline"} onClick={toggle}>
+      {running ? <Square /> : <Wand2 />} {running ? "Stop" : "Update"}
+    </Button>
   );
 }
 
@@ -184,9 +223,11 @@ function Questions() {
                   <summary className="flex cursor-pointer list-none items-center gap-4 px-5 py-3.5 hover:bg-muted/60">
                     <span className="w-24 shrink-0"><RiskBadge risk={a.risk} /></span>
                     <span className="min-w-0 flex-1">{a.title}</span>
+                    <AssumptionQuestions projectId={projectId} assumption={a} />
                     <span className="num shrink-0 text-xs text-muted-foreground">{a.validationQuestions.length}</span>
                     <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
                   </summary>
+                  {a.description && <p className="border-t px-5 py-3 text-sm text-muted-foreground">{a.description}</p>}
                   <ul className="divide-y divide-rule border-t bg-muted/40 px-5 pl-[calc(1.25rem+6rem+1rem)] max-md:pl-5">
                     {a.validationQuestions.map((text) => (
                       <QuestionRow key={text} text={text} />

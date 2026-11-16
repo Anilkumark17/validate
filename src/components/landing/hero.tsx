@@ -30,16 +30,12 @@ export function Hero() {
 
       <div id="top" className="mx-auto flex max-w-[1100px] flex-col items-center gap-9 pb-10 pt-[clamp(2.5rem,8svh,6rem)] text-center">
         <h1 className="lp-serif text-[clamp(3rem,8.4vw,8rem)]">
-          <span className="lp-mask"><span>Where product teams</span></span>
-          <span className="lp-mask">
-            <span style={{ ["--d" as string]: "110ms" }}>
-              <span className="lp-scribble">test ideas</span> and
-            </span>
-          </span>
-          <span className="lp-mask"><span style={{ ["--d" as string]: "220ms" }}>make decisions.</span></span>
+          <span className="lp-mask"><span>Where product teams turn</span></span>
+          <span className="lp-mask"><span style={{ ["--d" as string]: "110ms" }}>customer interviews into</span></span>
+          <span className="lp-mask"><span style={{ ["--d" as string]: "220ms" }}><span className="lp-scribble">evidence-backed</span> decisions.</span></span>
         </h1>
         <p className="lp-up lp-soft max-w-[46ch] text-[length:var(--step-lead)] leading-snug" style={{ ["--d" as string]: "420ms" }}>
-          Validate shows which roadmap bets rest on a guess, runs the customer interviews that test them, and keeps the evidence for every decision.
+          Validate captures what customers actually say, builds grounded customer profiles, and lets product managers test ideas, pricing, and messaging before launch.
         </p>
         <div className="lp-up w-full" style={{ ["--d" as string]: "500ms" }}>
           <HeroForm />

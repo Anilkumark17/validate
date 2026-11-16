@@ -9,8 +9,8 @@ export function UseCases() {
 
   return (
     <section id="roadmap" aria-labelledby="uc-h" className="mx-auto max-w-[1600px] px-[var(--margin)] py-24 md:py-32">
-      <p className="lp-soft text-[length:var(--step-small)]" data-reveal>Explore what your customers think</p>
-      <h2 id="uc-h" className="lp-serif mt-3 text-[length:var(--step-head)]" data-reveal>Test before you launch.</h2>
+      <p className="lp-soft text-[length:var(--step-small)]" data-reveal>Explore how your customers may respond</p>
+      <h2 id="uc-h" className="lp-serif mt-3 text-[length:var(--step-head)]" data-reveal>Test your biggest product bets before you build.</h2>
 
       <div className="mt-14 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
         <div role="tablist" aria-label="Use cases" className="grid gap-3">

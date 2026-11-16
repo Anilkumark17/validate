@@ -74,11 +74,20 @@ export function clearSession(res: NextResponse) {
   res.cookies.set("session", "", { ...cookieOpts(0), maxAge: 0 });
 }
 
-/** Guest cookie lists the meetings this browser joined through an invite link. */
-export function addGuestMeeting(req: Request, res: NextResponse, meetingId: string) {
-  const current = verify<{ m: string[] }>(cookie(req, "guest"))?.m ?? [];
-  const m = [...new Set([...current, meetingId])].slice(-20);
-  res.cookies.set("guest", sign({ m }, GUEST_TTL_S), cookieOpts(GUEST_TTL_S));
+type GuestToken = { m: string[]; n?: Record<string, string> };
+
+/** Guest cookie lists the meetings this browser joined, and the name they used for each one. */
+export function addGuestMeeting(req: Request, res: NextResponse, meetingId: string, name?: string) {
+  const current = verify<GuestToken>(cookie(req, "guest"));
+  const m = [...new Set([...(current?.m ?? []), meetingId])].slice(-20);
+  const n = { ...(current?.n ?? {}) };
+  if (name) n[meetingId] = name.trim().slice(0, 60);
+  for (const id of Object.keys(n)) if (!m.includes(id)) delete n[id];
+  res.cookies.set("guest", sign({ m, n }, GUEST_TTL_S), cookieOpts(GUEST_TTL_S));
+}
+
+function guestToken(req: Request): GuestToken {
+  return verify<GuestToken>(cookie(req, "guest")) ?? { m: [] };
 }
 
 export async function currentUser(req: Request) {
@@ -106,15 +115,10 @@ export async function requireProject(req: Request, projectId: string) {
 }
 
 function guestMeetings(req: Request): string[] {
-  return verify<{ m: string[] }>(cookie(req, "guest"))?.m ?? [];
+  return guestToken(req).m;
 }
 
-/** Signed session user id without a database round trip. */
-function sessionUserId(req: Request): string | null {
-  return verify<{ sub: string }>(cookie(req, "session"))?.sub ?? null;
-}
-
-/** The project owner, or a guest who joined this meeting by invite link. One query for either. */
+/** The project owner, or a guest who joined this meeting by invite link. The speaker name is the account name, or the name stored when the guest joined. */
 export async function requireMeetingAccess(req: Request, meetingId: string) {
   if (!isUuid(meetingId)) throw notFound("Meeting");
   const [row] = await db()
@@ -123,10 +127,13 @@ export async function requireMeetingAccess(req: Request, meetingId: string) {
     .innerJoin(schema.project, eq(schema.project.id, schema.meeting.projectId))
     .where(eq(schema.meeting.id, meetingId));
   if (!row) throw notFound("Meeting");
-  const sub = sessionUserId(req);
-  if (sub && row.ownerId === sub) return { meeting: row.meeting, host: true };
-  if (guestMeetings(req).includes(row.meeting.id)) return { meeting: row.meeting, host: false };
-  throw new ApiError(sub ? 403 : 401, sub ? "forbidden" : "unauthenticated", "No access to this meeting");
+  const user = await currentUser(req);
+  if (user && row.ownerId === user.id) return { meeting: row.meeting, host: true as const, speaker: user.name };
+  if (guestMeetings(req).includes(row.meeting.id)) {
+    const named = guestToken(req).n?.[row.meeting.id]?.trim();
+    return { meeting: row.meeting, host: false as const, speaker: named || "Guest" };
+  }
+  throw new ApiError(user ? 403 : 401, user ? "forbidden" : "unauthenticated", "No access to this meeting");
 }
 
 export async function requireMeetingHost(req: Request, meetingId: string) {

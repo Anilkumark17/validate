@@ -1,6 +1,6 @@
 "use client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, Radio } from "lucide-react";
+import { CalendarPlus, Radio, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -57,6 +57,62 @@ export function NewMeetingDialog({ projectId, goLive = false, label }: { project
           <div className="flex justify-end">
             <Button type="submit" disabled={create.isPending}>
               {create.isPending ? "Creating…" : goLive ? "Create and join" : "Create meeting"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Offline meeting notes: upload a .pdf, .txt or .md file and open it like an ended call. */
+export function UploadNotesDialog({ projectId }: { projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const qc = useQueryClient();
+  const router = useRouter();
+  const upload = useMutation({
+    mutationFn: (form: FormData) => api<Meeting & { segments: number }>(`/projects/${projectId}/meetings/upload`, { method: "POST", body: form }),
+    onSuccess: (m) => {
+      qc.invalidateQueries({ queryKey: ["meetings", projectId] });
+      setOpen(false);
+      toast.success(`Notes uploaded (${m.segments} part${m.segments === 1 ? "" : "s"}). Run Extract to get the summary and insights.`);
+      router.push(`/m/${m.id}/call`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Upload /> Upload notes
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title="Upload meeting notes"
+        description="For a meeting held offline. A .pdf, .txt or .md file up to 5 MB. Lines like “Priya: …” are read as that person speaking."
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            upload.mutate(new FormData(e.currentTarget));
+          }}
+        >
+          <div>
+            <Label htmlFor="notes-file">File</Label>
+            <Input id="notes-file" name="file" type="file" required accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown" />
+          </div>
+          <div>
+            <Label htmlFor="notes-title">Title (optional)</Label>
+            <Input id="notes-title" name="title" maxLength={160} placeholder="Defaults to the file name" />
+          </div>
+          <div>
+            <Label htmlFor="notes-held">Held on (optional)</Label>
+            <Input id="notes-held" name="heldAt" type="date" />
+          </div>
+          <div className="flex justify-end">
+            <Button type="submit" disabled={upload.isPending}>
+              {upload.isPending ? "Uploading…" : "Upload"}
             </Button>
           </div>
         </form>

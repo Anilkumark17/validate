@@ -1,8 +1,26 @@
+import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireProject } from "@/server/auth";
 import { launch, startRun } from "@/server/board/generate";
+import { db, schema } from "@/server/db";
+import { saveFocusNote } from "@/server/project-context";
 import { handle, parseBody, rateLimit } from "@/server/http";
-import { generateInput } from "@/lib/board/schemas";
+import { SETUP_ASPECT_LABEL, generateInput } from "@/lib/board/schemas";
+
+const { generationRun } = schema;
+
+/** A retry sends no aspects. Keep the ones the founder already chose on the earlier run. */
+async function focusForRun(projectId: string, aspects: string[], note: string) {
+  if (aspects.length > 0 || note.trim()) return { aspects, note };
+  const [prev] = await db()
+    .select({ input: generationRun.input })
+    .from(generationRun)
+    .where(and(eq(generationRun.projectId, projectId), eq(generationRun.kind, "initial")))
+    .orderBy(desc(generationRun.createdAt))
+    .limit(1);
+  const saved = (prev?.input ?? {}) as { aspects?: string[]; note?: string };
+  return { aspects: saved.aspects ?? [], note: saved.note ?? "" };
+}
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -17,7 +35,10 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   await requireProject(req, id);
   const v = await parseBody(req, generateInput);
-  const { run, started } = await startRun(id, "initial", {}, v.idempotencyKey);
+  const labeled = [...new Set(v.aspects.map((a) => (a in SETUP_ASPECT_LABEL ? SETUP_ASPECT_LABEL[a as keyof typeof SETUP_ASPECT_LABEL] : a)))];
+  const focus = await focusForRun(id, labeled, v.note);
+  await saveFocusNote(id, focus.aspects, focus.note);
+  const { run, started } = await startRun(id, "initial", focus, v.idempotencyKey);
   if (started) launch(run.id);
   return NextResponse.json({ run, started }, { status: 202 });
 });

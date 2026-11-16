@@ -36,7 +36,7 @@ export function Demo() {
 
   return (
     <section aria-labelledby="demo-h" className="mx-auto max-w-[1600px] px-[var(--margin)] py-24 md:py-32">
-      <h2 id="demo-h" className="lp-serif max-w-[10em] text-[length:var(--step-head)]" data-reveal>See how your customers might respond.</h2>
+      <h2 id="demo-h" className="lp-serif max-w-[10em] text-[length:var(--step-head)]" data-reveal>See how your customers may respond.</h2>
 
       <div className="mt-12 overflow-hidden rounded-[var(--radius)] border border-white/10 bg-[var(--surface)]" data-reveal>
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 p-5">
@@ -55,7 +55,7 @@ export function Demo() {
               <li key={r.who} className={`flex items-start gap-3 transition-opacity duration-500 ${shown > i ? "opacity-100" : "opacity-25"}`}>
                 <span aria-hidden className="grid size-9 flex-none place-items-center rounded-full bg-[var(--accent)]/20 text-[length:var(--step-small)] text-[var(--accent)]">{i + 1}</span>
                 <div>
-                  <p className="lp-soft text-[length:var(--step-small)]">Avatar {i + 1}: {r.who}</p>
+                  <p className="lp-soft text-[length:var(--step-small)]">Profile {i + 1}: {r.who}</p>
                   <p className="mt-1 rounded-2xl rounded-tl-sm bg-[var(--raised)] px-4 py-3">{shown > i ? `“${r.text}”` : "Waiting for the simulation"}</p>
                 </div>
               </li>
@@ -78,7 +78,7 @@ export function Demo() {
         </div>
 
         <p className="lp-soft border-t border-white/10 p-5 text-[length:var(--step-small)]">
-          Illustrative AI-generated simulation output. These are not actual customer feedback and do not predict real behavior.
+          Every profile and response is grounded in patterns from real interviews, with evidence you can inspect. This demo is illustrative AI-generated simulation output. These are not actual customer feedback and do not predict real behavior.
         </p>
       </div>
     </section>

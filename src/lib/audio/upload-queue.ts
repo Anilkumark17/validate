@@ -34,8 +34,8 @@ export interface QueueOptions {
 }
 
 /**
- * One in-flight upload at a time (keeps order). When uploads fall behind, the two oldest waiting
- * chunks are merged so audio is delayed rather than lost and memory stays bounded.
+ * One in-flight upload at a time (keeps order). When uploads fall behind, waiting chunks are merged
+ * up to the server's length limit. Audio that cannot be merged is kept and sent later. It is not dropped.
  */
 export class UploadQueue {
   private pending: QueuedChunk[] = [];
@@ -53,27 +53,26 @@ export class UploadQueue {
 
   push(c: QueuedChunk) {
     this.pending.push(c);
-    while (this.pending.length > this.o.maxPending) this.mergeWaiting();
+    while (this.pending.length > this.o.maxPending && this.mergeWaiting()) {}
     void this.run();
   }
 
-  /** Merge the two oldest chunks that are not being uploaded right now. */
-  private mergeWaiting() {
+  /**
+   * Merge the two oldest chunks that are not being uploaded right now.
+   * Returns false when the next pair would exceed the server limit, leaving both chunks queued.
+   */
+  private mergeWaiting(): boolean {
     const start = this.running ? 1 : 0;
     const a = this.pending[start];
     const b = this.pending[start + 1];
-    if (!a || !b) return;
+    if (!a || !b) return false;
     const sec = (a.samples.length + b.samples.length) / this.o.sampleRate;
-    if (sec > this.o.maxMergedSec) {
-      // Cannot merge without exceeding the server limit: drop the oldest waiting chunk and count it.
-      this.pending.splice(start, 1);
-      this.stats.dropped++;
-    } else {
-      // Keep a's chunkId and startSec; b's end time becomes the merged end time.
-      this.pending.splice(start, 2, { ...a, samples: concatPcm([a.samples, b.samples]), capturedAt: b.capturedAt });
-      this.stats.coalesced++;
-    }
+    if (sec > this.o.maxMergedSec) return false;
+    // Keep a's chunkId and startSec; b's end time becomes the merged end time.
+    this.pending.splice(start, 2, { ...a, samples: concatPcm([a.samples, b.samples]), capturedAt: b.capturedAt });
+    this.stats.coalesced++;
     this.o.onStats?.(this.stats);
+    return true;
   }
 
   private async run() {

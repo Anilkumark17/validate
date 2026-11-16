@@ -21,13 +21,14 @@ type Saved = Awaited<ReturnType<typeof addSegment>>;
 
 /**
  * A final phrase recognized in a participant's browser. Order: access check, persist, then broadcast
- * over LiveKit. Only this route creates transcript rows; interim text never reaches the database.
+ * over LiveKit. The speaker is the host's account name, or the guest's join name, not the name in the body. Interim text never reaches the database.
  */
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   rateLimit(req, "segments", 240);
   const { id } = await ctx.params;
-  const { meeting: m } = await requireMeetingAccess(req, id);
+  const { meeting: m, speaker } = await requireMeetingAccess(req, id);
   await enforceMeetingTime(m);
+  if (m.state !== "live") throw new ApiError(409, "not_live", "The host has not started the meeting yet");
   const v = await parseBody(req, input);
 
   // A retried POST with the same clientId gets the first result: no second row, no second broadcast.
@@ -35,7 +36,7 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   let work = savedSegments.get(key) as Promise<Saved> | undefined;
   const duplicate = !!work;
   if (!work) {
-    work = addSegment(id, { speaker: v.speaker, text: v.text, startSec: v.startSec });
+    work = addSegment(id, { speaker, text: v.text, startSec: v.startSec });
     savedSegments.set(key, work);
     work.catch(() => savedSegments.delete(key));
     work.then((row) => {

@@ -35,18 +35,18 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   rateLimit(req, "transcribe", 90);
   const t0 = Date.now();
   const { id } = await ctx.params;
-  const { meeting: m } = await requireMeetingAccess(req, id);
+  const { meeting: m, speaker: who } = await requireMeetingAccess(req, id);
   await enforceMeetingTime(m);
+  if (m.state !== "live") throw new ApiError(409, "not_live", "The host has not started the meeting yet");
 
   const form = await req.formData();
   const audio = form.get("audio");
   if (!(audio instanceof File)) throw new ApiError(400, "no_audio", "Missing audio field");
   if (audio.size > MAX_BYTES) throw new ApiError(413, "too_large", "Audio chunk too large");
-  const speaker = ((form.get("speaker") as string | null) ?? "").trim().slice(0, 120);
-  if (!speaker) throw new ApiError(400, "no_speaker", "Missing speaker");
+  const speaker = who.slice(0, 120);
   const clientId = String(form.get("clientId") ?? "");
   if (!/^[\w-]{8,64}$/.test(clientId)) throw new ApiError(400, "no_client_id", "Missing clientId");
-  const startSec = Math.max(0, Number(form.get("startSec") ?? 0) || 0);
+  const startSec = Math.min(24 * 3600, Math.max(0, Number(form.get("startSec") ?? 0) || 0));
   const capturedAt = Number(form.get("capturedAt") ?? 0) || null;
 
   const bytes = await audio.arrayBuffer();

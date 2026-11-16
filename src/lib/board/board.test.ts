@@ -3,7 +3,46 @@ import type { BoardAssumption } from "./client";
 import { computeProgress, isLeadingQuestion, looksLikeFabricatedEvidence, normalizeKey, riskBucket, riskOf, similarity, STATUSES } from "./constants";
 import { applyFilters, NO_FILTERS } from "./filter";
 import { generationOutputSchema, guideOutputSchema } from "./schemas";
+import { assignOutput } from "./assign";
+import { toAssumptionFields, updateTurnOutput } from "./update-thinking";
 import { ALLOWED, checkMove, type EvidenceLite } from "./transitions";
+
+describe("update thinking", () => {
+  const refined = {
+    title: "Parents replan dinner after a late meeting",
+    statement: "Busy parents change the evening meal when a meeting runs past six.",
+    segment: "Parents of school-age children",
+    decision_informed: "We would test a same-day replan, not a weekly planner.",
+    validation_method: "Interview about the last late meeting",
+    success_criterion: "Three parents describe replanning the same day",
+    kill_criterion: "None of them changed the meal",
+    impact: 4,
+    uncertainty: 3,
+    score_reason: "The user said a late meeting is common, and the product is about that evening.",
+  };
+
+  it("maps a proposal onto assumption fields and leaves status alone", () => {
+    const fields = toAssumptionFields(refined);
+    expect(fields.title).toBe(refined.title);
+    expect(fields.description).toContain("Busy parents change the evening meal");
+    expect(fields.description).toContain("Who: Parents of school-age children");
+    expect(fields.successCriteria).toContain("Kill: None of them changed the meal");
+    expect(fields.impact).toBe(4);
+    expect(fields).not.toHaveProperty("status");
+  });
+
+  it("rejects a cross question that asks what the user would do", () => {
+    const parsed = updateTurnOutput.safeParse({
+      done: false,
+      gap: "no_behaviour",
+      quoted: "they seem frustrated",
+      why: "A feeling is not something you can check.",
+      question: "Would you say they are frustrated often?",
+      asked: 1,
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
 
 describe("risk", () => {
   it("is impact x uncertainty, 1 to 25", () => {
@@ -241,5 +280,37 @@ describe("interview guide validation", () => {
     const g = guide();
     g.acts[2]!.questions.pop();
     expect(gs.safeParse(g).success).toBe(false);
+  });
+});
+
+describe("stakeholder assignment proposal", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+  const S = "33333333-3333-4333-8333-333333333333";
+  const schema = assignOutput([A, B], [S]);
+  const link = {
+    assumption_id: A,
+    primary: S,
+    secondary: null,
+    score_primary: 3,
+    score_secondary: null,
+    evidence_mode: "interview",
+    round: "round_1",
+    reason: "Parents lived the last dinner decision.",
+    action: "add",
+  };
+  const base = {
+    links: [link],
+    no_fit: [{ assumption_id: B, reason: "Nobody in the roles did this.", better_method: "observation" }],
+    load: [{ stakeholder_id: S, primary_count: 1, round_1_count: 1, queued_count: 0 }],
+    missing_roles: [],
+    notes: [],
+  };
+  it("accepts one row per assumption", () => {
+    expect(schema.safeParse(base).success).toBe(true);
+  });
+  it("rejects a missing assumption and an unknown stakeholder", () => {
+    expect(schema.safeParse({ ...base, no_fit: [] }).success).toBe(false);
+    expect(schema.safeParse({ ...base, links: [{ ...link, primary: B }] }).success).toBe(false);
   });
 });

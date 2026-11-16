@@ -1,4 +1,4 @@
-const JOURNEY = ["Real interview", "Customer intelligence", "AI avatar", "Simulated interaction", "Actionable insights"];
+const JOURNEY = ["Real interview", "Customer evidence", "Grounded profile", "Simulated interaction", "Actionable insights"];
 
 const QUESTIONS = [
   "Why would you choose this product?",
@@ -15,7 +15,7 @@ export function Workflow() {
   return (
     <section id="how" aria-labelledby="how-h" className="mx-auto max-w-[1600px] px-[var(--margin)] py-24 md:py-32">
       <h2 id="how-h" className="lp-serif max-w-[10em] text-[length:var(--step-head)]" data-reveal>
-        From real conversations to simulated customers.
+        From customer interviews to testable AI customers.
       </h2>
 
       <ol aria-label="The path from interview to insight" className="mt-12 flex flex-wrap items-center gap-2 text-[length:var(--step-small)]" data-reveal>
@@ -40,7 +40,7 @@ export function Workflow() {
           </div>
         </Step>
 
-        <Step n="2" title="Build AI Avatars" body="Validate transforms interview insights into individual AI customer profiles grounded in actual conversation evidence.">
+        <Step n="2" title="Build Evidence-Grounded Customer Profiles" body="Validate transforms interview insights into individual AI customer profiles grounded in patterns from real interviews. Every field links back to the quote behind it.">
           <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-[length:var(--step-small)]">
             {AVATAR_FIELDS.map((f) => (
               <li key={f} className="flex items-center gap-2">
@@ -50,7 +50,7 @@ export function Workflow() {
           </ul>
         </Step>
 
-        <Step n="3" title="Talk to Your AI Customers" body="Interact with AI avatars conversationally. Ask questions like:">
+        <Step n="3" title="Question Your AI Customers" body="Ask your profiles follow-up questions. Ask questions like:">
           <ul className="space-y-2 text-[length:var(--step-small)]">
             {QUESTIONS.map((q) => (
               <li key={q} className="w-fit rounded-2xl rounded-bl-sm border border-white/10 bg-[var(--raised)] px-3.5 py-2">{q}</li>
@@ -58,7 +58,7 @@ export function Workflow() {
           </ul>
         </Step>
 
-        <Step n="4" title="Simulate and Validate" body="Put your ideas in front of your AI customer population. Understand how different customers might respond, what attracts them, what confuses them, and what influences their decisions.">
+        <Step n="4" title="Simulate and Validate" body="Put your ideas in front of your AI customer profiles. Explore how different customers may respond, what attracts them, what confuses them, and what influences their decisions.">
           <div className="space-y-3 text-[length:var(--step-small)]">
             {[
               ["Attracts", 78],
@@ -70,7 +70,7 @@ export function Workflow() {
                 <div className="h-1.5 rounded-full bg-white/10"><div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${w}%` }} /></div>
               </div>
             ))}
-            <p className="lp-soft">Illustrative bars. They show the kind of output, not measured results.</p>
+            <p className="lp-soft">Illustrative bars. They show the kind of output, not measured results. Every profile and response is grounded in patterns from real interviews, with evidence you can inspect.</p>
           </div>
         </Step>
       </div>

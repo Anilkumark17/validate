@@ -30,13 +30,15 @@ export const PATCH = handle(async (req: Request, ctx: Ctx) => {
   }
 });
 
-/** A role with recorded evidence cannot be removed; unlink it from assumptions instead. */
+/** A role with evidence, or one still linked to assumptions, cannot be removed. Unlink it first. */
 export const DELETE = handle(async (req: Request, ctx: Ctx) => {
   const { id, sid } = await ctx.params;
   await requireProject(req, id);
   await requireStakeholder(id, sid);
   const [{ n }] = await db().select({ n: sql<number>`count(*)::int` }).from(schema.assumptionEvidence).where(eq(schema.assumptionEvidence.stakeholderId, sid));
   if (n > 0) throw new ApiError(409, "has_evidence", "Evidence is recorded for this stakeholder, so it cannot be removed.");
+  const [{ n: links }] = await db().select({ n: sql<number>`count(*)::int` }).from(schema.assumptionStakeholder).where(eq(schema.assumptionStakeholder.stakeholderId, sid));
+  if (links > 0) throw new ApiError(409, "has_links", "Unlink this role from its assumptions before removing it.");
   await db().delete(schema.stakeholder).where(eq(schema.stakeholder.id, sid));
   return NextResponse.json({ ok: true });
 });

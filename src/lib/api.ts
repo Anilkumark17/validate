@@ -74,6 +74,8 @@ export interface Meeting {
   participants: string[];
   startedAt: string | null;
   endedAt: string | null;
+  consentAt: string | null;
+  customer: { role?: string; segment?: string; stage?: string } | null;
   createdAt: string;
 }
 

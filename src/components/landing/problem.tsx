@@ -8,7 +8,7 @@ export function Problem() {
   return (
     <section aria-labelledby="problem-h" className="mx-auto max-w-[1600px] px-[var(--margin)] py-24 md:py-32">
       <h2 id="problem-h" className="lp-serif max-w-[11em] text-[length:var(--step-head)]" data-reveal>
-        You talk to customers. But do you really understand them?
+        You talk to customers. But does the evidence reach your decisions?
       </h2>
       <ul className="mt-14 grid gap-px overflow-hidden rounded-[var(--radius)] border border-white/10 bg-white/10 md:grid-cols-3">
         {PROBLEMS.map((p, i) => (
@@ -20,7 +20,7 @@ export function Problem() {
         ))}
       </ul>
       <p className="lp-serif mt-16 max-w-[18em] text-[length:var(--step-title)] text-[var(--accent)]" data-reveal>
-        What if every customer conversation could become a customer you could learn from?
+        What if every customer conversation became evidence you could inspect, reuse and test against?
       </p>
     </section>
   );

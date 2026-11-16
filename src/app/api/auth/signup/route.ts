@@ -21,7 +21,7 @@ export const POST = handle(async (req: Request) => {
     .onConflictDoNothing()
     .returning({ id: schema.appUser.id, email: schema.appUser.email, name: schema.appUser.name });
   const u = rows[0];
-  if (!u) throw new ApiError(409, "email_taken", "An account with this email already exists");
+  if (!u) throw new ApiError(400, "signup_failed", "Could not create an account. If you already have one, sign in.");
   const res = NextResponse.json(u, { status: 201 });
   setSession(res, u.id);
   return res;

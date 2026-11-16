@@ -2,14 +2,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle, Loader2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageState, TopBar } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/form";
+import { Input, Label, Textarea } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { RequireAuth } from "@/lib/auth";
 import { boardKey, isActive, refreshBoard, useBoard, type Run } from "@/lib/board/client";
+import { SETUP_ASPECTS, SETUP_ASPECT_LABEL } from "@/lib/board/schemas";
 import { cn } from "@/lib/utils";
 
 export default function SetupPage() {
@@ -58,8 +59,8 @@ function Steps({ steps }: { steps: { label: string; note?: string; state: StepSt
 
 /**
  * After creating a project: (1) one optional audience question, only if the idea does not name its
- * audience, (2) generation with a visible status, (3) redirect to the workspace. A failure keeps the
- * project and offers a retry.
+ * audience, (2) a note and the aspects the assumptions should cover, (3) generation with a visible
+ * status, (4) redirect to the workspace. A failure keeps the project and offers a retry.
  */
 function Setup() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -68,18 +69,27 @@ function Setup() {
   const board = useBoard(projectId);
   const [custom, setCustom] = useState("");
   const [answered, setAnswered] = useState(false);
-  const startedFor = useRef<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [own, setOwn] = useState("");
 
   const audience = useQuery({
     queryKey: ["audience", projectId],
     queryFn: () => api<AudienceResult>(`/projects/${projectId}/audience/analyze`, { method: "POST" }),
     retry: false,
     staleTime: Infinity,
-    enabled: !!board.data && board.data.assumptions.length === 0 && !board.data.runs.initial,
+    enabled:
+      !!board.data &&
+      board.data.assumptions.length === 0 &&
+      board.data.project.audienceState === "unknown" &&
+      board.data.runs.initial?.status !== "completed" &&
+      board.data.runs.initial?.status !== "pending" &&
+      board.data.runs.initial?.status !== "running",
   });
 
   const start = useMutation({
-    mutationFn: () => api<{ run: Run }>(`/projects/${projectId}/generate`, { method: "POST", json: { idempotencyKey: crypto.randomUUID() } }),
+    mutationFn: (body: { aspects: string[]; note: string }) =>
+      api<{ run: Run }>(`/projects/${projectId}/generate`, { method: "POST", json: { idempotencyKey: crypto.randomUUID(), aspects: body.aspects, note: body.note } }),
     onSuccess: () => refreshBoard(qc, projectId),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -94,18 +104,14 @@ function Setup() {
 
   const data = board.data;
   const run = data?.runs.initial ?? null;
-  const needQuestion = !!audience.data?.needsQuestion && !answered && !run;
-  const audienceSettled = audience.isFetched && !needQuestion;
+  const needQuestion = !!audience.data?.needsQuestion && !answered && !isActive(run);
 
-  // Start generation once the audience question is settled. One start per page visit.
-  useEffect(() => {
-    if (!data || run || start.isPending || startedFor.current === projectId) return;
-    if (data.assumptions.length > 0) return;
-    if (audienceSettled || audience.isError) {
-      startedFor.current = projectId;
-      start.mutate();
-    }
-  }, [data, run, audienceSettled, audience.isError, projectId, start]);
+  function begin(aspects: string[], text: string, includeDraft = false) {
+    if (start.isPending) return;
+    const extra = includeDraft ? own.trim() : "";
+    const withOwn = extra.length >= 2 && !aspects.includes(extra) ? [...aspects, extra] : aspects;
+    start.mutate({ aspects: withOwn.slice(0, 8), note: text });
+  }
 
   useEffect(() => {
     if (run?.status === "completed" || (data && data.assumptions.length > 0 && !isActive(run))) router.replace(`/p/${projectId}`);
@@ -133,10 +139,21 @@ function Setup() {
       state: reading ? "waiting" : needQuestion ? "active" : "done",
     },
     {
+      label: "Say what the assumptions should cover",
+      note: !run && !needQuestion && !reading ? "Pick aspects, or skip" : undefined,
+      state: reading || needQuestion ? "waiting" : run || generating ? "done" : "active",
+    },
+    {
       label: "Draft assumptions and interview roles",
       note: generating ? "Usually under a minute" : undefined,
       state: run?.status === "failed" ? "failed" : generating ? "active" : "waiting",
     },
+  ];
+  const showAspects = !run && !needQuestion && !reading && !generating;
+  const preset = new Set<string>(SETUP_ASPECTS);
+  const aspectItems = [
+    ...SETUP_ASPECTS.map((id) => ({ id, label: SETUP_ASPECT_LABEL[id] })),
+    ...picked.filter((id) => !preset.has(id)).map((id) => ({ id, label: id })),
   ];
 
   return (
@@ -183,13 +200,62 @@ function Setup() {
           </section>
         )}
 
+        {showAspects && (
+          <section className="mt-4 space-y-5 rounded-lg border bg-card p-5" aria-labelledby="focus-q">
+            <div>
+              <h2 id="focus-q" className="text-base font-semibold">What should the assumptions cover?</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Write what you already know, then select the parts of people’s behavior you want tested. Add your own if none of these fit. This is used to draft assumptions. It is not evidence.</p>
+            </div>
+            <Textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={4000} rows={6} className="min-h-36" placeholder="What you already know about the people, the flow, or how you would test it" aria-label="What you already know" />
+            <fieldset>
+              <legend className="mb-3 text-sm font-medium">Aspects</legend>
+              <div className="flex flex-wrap gap-x-6 gap-y-3">
+                {aspectItems.map((item) => {
+                  const on = picked.includes(item.id);
+                  return (
+                    <label key={item.id} className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="size-4 rounded-sm border border-input"
+                        checked={on}
+                        onChange={() => setPicked(on ? picked.filter((x) => x !== item.id) : [...picked, item.id])}
+                      />
+                      {item.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <form
+              className="flex items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const label = own.trim();
+                if (label.length < 2 || picked.includes(label)) return;
+                setPicked([...picked, label]);
+                setOwn("");
+              }}
+            >
+              <div className="flex-1">
+                <Label htmlFor="own-aspect">Add your own</Label>
+                <Input id="own-aspect" value={own} onChange={(e) => setOwn(e.target.value)} maxLength={40} placeholder="For example, who pays" />
+              </div>
+              <Button type="submit" variant="outline" disabled={own.trim().length < 2 || picked.length >= 8}>Add</Button>
+            </form>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => begin([], "")} disabled={start.isPending}>Skip</Button>
+              <Button onClick={() => begin(picked, note, true)} disabled={start.isPending}>{start.isPending ? "Starting…" : "Generate assumptions"}</Button>
+            </div>
+          </section>
+        )}
+
         {run?.status === "failed" && (
           <div className="mt-4 space-y-3 rounded-lg border border-destructive/40 bg-card p-5" role="alert">
             <p className="font-medium text-destructive">Generation failed</p>
             <p className="text-sm">{run.error}</p>
             <p className="text-sm text-muted-foreground">Your project is saved. Retrying will not create duplicates.</p>
             <div className="flex gap-2">
-              <Button onClick={() => start.mutate()} disabled={start.isPending}>{start.isPending ? "Starting…" : "Retry generation"}</Button>
+              <Button onClick={() => begin([], "")} disabled={start.isPending}>{start.isPending ? "Starting…" : "Retry generation"}</Button>
               <Button variant="outline" onClick={() => router.push(`/p/${projectId}`)}>Open project anyway</Button>
             </div>
           </div>

@@ -1,15 +1,16 @@
 "use client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { isActive, refreshBoard, useBoard, type Run } from "@/lib/board/client";
 
-export function RetryGeneration({ projectId, label = "Retry generation" }: { projectId: string; label?: string }) {
+export function RetryGeneration({ projectId, label = "Retry generation", extras = false }: { projectId: string; label?: string; extras?: boolean }) {
   const qc = useQueryClient();
   const retry = useMutation({
-    mutationFn: () => api(`/projects/${projectId}/generate`, { method: "POST", json: { idempotencyKey: crypto.randomUUID() } }),
+    mutationFn: () => api(`/projects/${projectId}/${extras ? "regenerate" : "generate"}`, { method: "POST", json: { idempotencyKey: crypto.randomUUID() } }),
     onSuccess: () => refreshBoard(qc, projectId),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -34,19 +35,29 @@ export function GenerationNotice({ projectId }: { projectId: string }) {
       </div>
     );
   }
+  if (initial?.status === "failed" && initial.error === "Stopped") {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-sm" role="status">
+        <span className="min-w-0 flex-1">Generation stopped. Nothing further was saved.</span>
+        <RetryGeneration projectId={projectId} extras={!!initial.input?.extras} label="Regenerate" />
+      </div>
+    );
+  }
   if (initial?.status === "failed") {
     return (
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm" role="alert">
         <span className="min-w-0 flex-1 text-destructive">Generation failed: {initial.error ?? "unknown error"}. Your project is saved.</span>
-        <RetryGeneration projectId={projectId} />
+        <RetryGeneration projectId={projectId} extras={!!initial.input?.extras} />
       </div>
     );
   }
   if (!initial && data.assumptions.length === 0) {
     return (
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-sm">
-        <span className="flex-1">No assumptions yet.</span>
-        <RetryGeneration projectId={projectId} label="Generate assumptions" />
+        <span className="flex-1">No assumptions yet. Say what they should cover, then generate.</span>
+        <Button size="sm" asChild>
+          <Link href={`/p/${projectId}/setup`}>Choose what to test</Link>
+        </Button>
       </div>
     );
   }

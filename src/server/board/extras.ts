@@ -1,7 +1,8 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { MAX_PERSONAS } from "@/lib/schemas";
 import { db, schema } from "../db";
-import { createGuide } from "./guides";
+import { replaceGuide } from "./guides";
 import { glmJson } from "./glm";
 import type { PromptProject } from "./prompts";
 
@@ -46,21 +47,30 @@ Shape: {"personas":[{"name":string,"summary":string,"jtbdSummary":string,"mindse
 }
 
 /** Replaces the AI drafts. Approved and user-created personas stay. */
-async function makePersonas(projectId: string, p: PromptProject): Promise<number> {
+async function makePersonas(projectId: string, p: PromptProject, signal?: AbortSignal): Promise<number> {
   const [assumptions, roles] = await Promise.all([
     db().select({ title: schema.assumption.title }).from(schema.assumption).where(eq(schema.assumption.projectId, projectId)).orderBy(sql`${schema.assumption.risk} desc nulls last`).limit(12),
     db().select({ roleName: schema.stakeholder.roleName }).from(schema.stakeholder).where(eq(schema.stakeholder.projectId, projectId)).orderBy(asc(schema.stakeholder.createdAt)),
   ]);
   const prompt = personaPrompt(p, assumptions.map((a) => a.title), roles.map((r) => r.roleName));
-  const { data } = await glmJson(personaOutput, { system: prompt.system, user: prompt.user, maxTokens: 6000 });
-  await db()
-    .insert(schema.persona)
-    .values(data.personas.map((x) => ({ projectId, source: "ai_generated" as const, status: "draft" as const, ...x })));
-  return data.personas.length;
+  const { data } = await glmJson(personaOutput, { system: prompt.system, user: prompt.user, maxTokens: 6000, signal });
+  if (signal?.aborted) return 0;
+  const [{ n }] = await db()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.persona)
+    .where(and(eq(schema.persona.projectId, projectId), sql`${schema.persona.source} <> 'ai_generated' or ${schema.persona.status} <> 'draft'`));
+  const room = Math.max(0, MAX_PERSONAS - (n ?? 0));
+  if (room === 0) throw new Error("The project already has the maximum number of personas");
+  const batch = data.personas.slice(0, room);
+  await db().transaction(async (tx) => {
+    await tx.delete(schema.persona).where(and(eq(schema.persona.projectId, projectId), eq(schema.persona.source, "ai_generated"), eq(schema.persona.status, "draft")));
+    await tx.insert(schema.persona).values(batch.map((x) => ({ projectId, source: "ai_generated" as const, status: "draft" as const, ...x })));
+  });
+  return batch.length;
 }
 
 /** Interview guides for the roles that matter most. Roles with no linked assumptions are skipped. */
-async function makeGuides(projectId: string): Promise<{ made: number; failed: number }> {
+async function makeGuides(projectId: string, signal?: AbortSignal): Promise<{ made: number; failed: number }> {
   const roles = await db()
     .select({ id: schema.stakeholder.id })
     .from(schema.stakeholder)
@@ -69,8 +79,9 @@ async function makeGuides(projectId: string): Promise<{ made: number; failed: nu
       sql`case ${schema.stakeholder.interviewPriority} when 'high' then 0 when 'medium' then 1 else 2 end`,
       sql`${schema.stakeholder.relevance} desc`,
     );
-  const results = await Promise.allSettled(roles.slice(0, MAX_GUIDES).map((r) => createGuide(projectId, r.id)));
-  const made = results.filter((r) => r.status === "fulfilled").length;
+  if (signal?.aborted) return { made: 0, failed: 0 };
+  const results = await Promise.allSettled(roles.slice(0, MAX_GUIDES).map((r) => replaceGuide(projectId, r.id, signal)));
+  const made = results.filter((r) => r.status === "fulfilled" && r.value).length;
   return { made, failed: results.length - made };
 }
 
@@ -78,14 +89,28 @@ async function makeGuides(projectId: string): Promise<{ made: number; failed: nu
  * The steps after the assumptions and stakeholders exist. Best effort: a failure here is reported
  * on the run, and never undoes what was already saved.
  */
-export async function generateExtras(projectId: string, p: PromptProject): Promise<ExtrasResult> {
+export async function generateExtras(projectId: string, p: PromptProject, signal?: AbortSignal): Promise<ExtrasResult> {
   const out: ExtrasResult = { personas: 0, guides: 0, failed: [] };
-  const [persona, guides] = await Promise.allSettled([makePersonas(projectId, p), makeGuides(projectId)]);
+  if (signal?.aborted) return out;
+  const [persona, guides] = await Promise.allSettled([makePersonas(projectId, p, signal), makeGuides(projectId, signal)]);
   if (persona.status === "fulfilled") out.personas = persona.value;
   else out.failed.push("personas");
   if (guides.status === "fulfilled") {
     out.guides = guides.value.made;
     if (guides.value.failed > 0) out.failed.push(`${guides.value.failed} interview guide(s)`);
   } else out.failed.push("interview guides");
+  await dropStaleGuides(projectId);
   return out;
+}
+
+/** Guides whose assumptions were replaced no longer point at a real row. Drop those, keep the rest. */
+async function dropStaleGuides(projectId: string) {
+  await db().execute(sql`
+    delete from interview_guide g
+    where g.project_id = ${projectId}
+      and exists (
+        select 1 from unnest(g.assumption_ids) as aid
+        where not exists (select 1 from assumption a where a.id = aid)
+      )
+  `);
 }

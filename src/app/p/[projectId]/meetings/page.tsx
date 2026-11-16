@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageState } from "@/components/app-shell";
-import { NewMeetingDialog } from "@/components/meeting-dialogs";
+import { NewMeetingDialog, UploadNotesDialog } from "@/components/meeting-dialogs";
 import { ProjectHeader } from "@/components/project-nav";
 import { Button } from "@/components/ui/button";
 import { api, type Meeting } from "@/lib/api";
@@ -58,6 +58,7 @@ function Meetings() {
     <>
       <main className="max-w-4xl">
         <ProjectHeader projectId={projectId}>
+          <UploadNotesDialog projectId={projectId} />
           <NewMeetingDialog projectId={projectId} />
           <NewMeetingDialog projectId={projectId} goLive />
         </ProjectHeader>
@@ -66,7 +67,7 @@ function Meetings() {
           <section className="rounded-lg border border-dashed bg-card px-6 py-10">
             <h2 className="text-base font-semibold">No meetings yet</h2>
             <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-              Start a live call to talk to a customer now, or schedule one and send the invite link. The transcript is written as people speak and feeds the evidence.
+              Start a live call to talk to a customer now, schedule one and send the invite link, or upload notes from a meeting held offline. The transcript is written as people speak and feeds the evidence.
             </p>
           </section>
         )}
@@ -97,7 +98,7 @@ function Meetings() {
                 ) : (
                   <Button size="sm" variant="outline" asChild>
                     <Link href={`/m/${m.id}/call`}>
-                      <FileText /> Transcript
+                      <FileText /> {m.source === "transcript_upload" ? "Notes" : "Transcript"}
                     </Link>
                   </Button>
                 )}

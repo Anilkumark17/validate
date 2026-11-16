@@ -9,6 +9,8 @@ export interface Me {
   id: string;
   email: string;
   name: string;
+  /** True when this account has no usage cap. The address itself stays on the server. */
+  exempt?: boolean;
 }
 
 export function useMe() {

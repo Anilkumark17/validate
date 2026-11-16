@@ -194,8 +194,21 @@ export const audienceInput = z.object({
   value: short(3, 300).optional(),
 });
 
+/** Aspects a founder can mark before the first generation. They can also type their own. */
+export const SETUP_ASPECTS = ["target_customer", "user_flow", "user_behavior", "current_flow", "testing_app"] as const;
+export const SETUP_ASPECT_LABEL: Record<(typeof SETUP_ASPECTS)[number], string> = {
+  target_customer: "Target customer",
+  user_flow: "User flow",
+  user_behavior: "User behavior",
+  current_flow: "Current flow",
+  testing_app: "Testing the app",
+};
+
 export const generateInput = z.object({
   idempotencyKey: z.string().regex(/^[\w-]{8,64}$/),
+  /** Preset ids or a short label the founder typed. */
+  aspects: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+  note: z.string().trim().max(4000).default(""),
 });
 
 export const REFINE_DIMENSIONS = [
@@ -221,11 +234,22 @@ export const REFINE_LABEL: Record<(typeof REFINE_DIMENSIONS)[number], string> = 
   regulatory: "Regulatory or compliance requirements",
 };
 
-export const refineInput = z.object({
-  idempotencyKey: z.string().regex(/^[\w-]{8,64}$/),
-  dimensions: z.array(z.enum(REFINE_DIMENSIONS)).min(1).max(REFINE_DIMENSIONS.length),
-  notes: z.record(z.string(), short(0, 2000)).default({}),
-});
+export const refineInput = z
+  .object({
+    idempotencyKey: z.string().regex(/^[\w-]{8,64}$/),
+    dimensions: z.array(z.enum(REFINE_DIMENSIONS)).max(REFINE_DIMENSIONS.length).default([]),
+    notes: z.record(z.string(), short(0, 2000)).default({}),
+    learning: z.string().trim().max(4000).default(""),
+    answers: z
+      .array(z.object({ question: z.string().trim().min(1).max(400), answer: z.string().trim().min(1).max(2000) }))
+      .max(2)
+      .default([]),
+  })
+  .superRefine((v, c) => {
+    if (v.dimensions.length === 0 && !v.learning.trim()) {
+      c.addIssue({ code: "custom", message: "Add a learning note or select an aspect", path: ["learning"] });
+    }
+  });
 
 export const assumptionCreate = z.object({
   title: short(8, 200),

@@ -15,6 +15,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -33,7 +34,7 @@ export const validationStatus = pgEnum("validation_status", [
   "needs_more_evidence",
 ]);
 export const generationStatus = pgEnum("generation_status", ["pending", "running", "completed", "failed"]);
-export const generationKind = pgEnum("generation_kind", ["initial", "refine"]);
+export const generationKind = pgEnum("generation_kind", ["initial", "refine", "extract"]);
 export const creationSource = pgEnum("creation_source", ["ai_generated", "user_created"]);
 export const evidenceType = pgEnum("evidence_type", [
   "interview",
@@ -104,6 +105,10 @@ export const meeting = pgTable(
     modelCalls: integer("model_calls").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** Set when the host records that the customer consented to this interview being used. */
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** { role, segment, stage } for the person interviewed. */
+    customer: jsonb("customer"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("meeting_project_idx").on(t.projectId)],
@@ -119,6 +124,11 @@ export const segment = pgTable(
     text: text("text").notNull(),
     startSec: real("start_sec"),
     endSec: real("end_sec"),
+    /** English from the extract normaliser. The original text column is never overwritten. */
+    textEn: text("text_en"),
+    languages: text("languages").array().notNull().default([]),
+    confidence: smallint("confidence"),
+    flags: text("flags").array().notNull().default([]),
     processed: boolean("processed").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -131,6 +141,7 @@ export const generationRun = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    meetingId: uuid("meeting_id").references(() => meeting.id, { onDelete: "cascade" }),
     kind: generationKind("kind").notNull(),
     status: generationStatus("status").notNull().default("pending"),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -147,7 +158,9 @@ export const generationRun = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique("generation_run_idem_uq").on(t.projectId, t.idempotencyKey),
+    unique("generation_run_idem_uq").on(t.projectId, t.kind, t.idempotencyKey),
+    uniqueIndex("generation_run_one_active_uq").on(t.projectId).where(sql`${t.status} in ('pending', 'running') and ${t.kind} <> 'extract'`),
+    uniqueIndex("generation_run_one_extract_uq").on(t.meetingId).where(sql`${t.kind} = 'extract' and ${t.status} in ('pending', 'running')`),
     index("generation_run_project_idx").on(t.projectId, t.createdAt),
   ],
 );
@@ -327,5 +340,43 @@ export const interviewGuide = pgTable(
   (t) => [
     foreignKey({ columns: [t.stakeholderId, t.projectId], foreignColumns: [stakeholder.id, stakeholder.projectId] }).onDelete("cascade"),
     index("interview_guide_project_idx").on(t.projectId),
+  ],
+);
+
+/** An insight taken from one interview. Only a person can confirm it. Mapping is a later stage. */
+export const insight = pgTable(
+  "insight",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => project.id, { onDelete: "cascade" }),
+    meetingId: uuid("meeting_id").notNull().references(() => meeting.id, { onDelete: "cascade" }),
+    generationRunId: uuid("generation_run_id").references(() => generationRun.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("ai_suggested"),
+    segmentIds: uuid("segment_ids").array().notNull().default([]),
+    tStart: real("t_start"),
+    tEnd: real("t_end"),
+    quoteEn: text("quote_en").notNull(),
+    summaryEn: text("summary_en").notNull(),
+    kind: text("kind").notNull(),
+    evidenceType: text("evidence_type").notNull(),
+    ledByInterviewer: boolean("led_by_interviewer").notNull().default(false),
+    profileTags: text("profile_tags").array().notNull().default([]),
+    profileSignals: jsonb("profile_signals").notNull().default([]),
+    importance: smallint("importance").notNull(),
+    confidence: smallint("confidence").notNull(),
+    flags: text("flags").array().notNull().default([]),
+    promptVersion: text("prompt_version").notNull(),
+    model: text("model"),
+    contextLog: jsonb("context_log"),
+    rejectReason: text("reject_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("insight_status_chk", sql`${t.status} in ('ai_suggested', 'confirmed', 'rejected')`),
+    check("insight_importance_chk", sql`${t.importance} between 1 and 5`),
+    check("insight_confidence_chk", sql`${t.confidence} between 0 and 100`),
+    index("insight_meeting_idx").on(t.meetingId, t.createdAt),
+    index("insight_project_idx").on(t.projectId, t.status),
   ],
 );

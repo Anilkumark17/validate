@@ -138,6 +138,29 @@ describe("UploadQueue", () => {
     expect(q.stats.dropped).toBe(0);
     expect(q.stats.coalesced).toBeGreaterThan(0);
   });
+
+  it("keeps chunks it cannot merge under the server length limit", async () => {
+    const sent: QueuedChunk[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const q = new UploadQueue({
+      ...base,
+      maxPending: 2,
+      maxAttempts: 1,
+      send: async (c) => {
+        await gate;
+        sent.push(c);
+        return { ok: true };
+      },
+    });
+    for (const id of ["a", "b", "c"]) q.push(chunk(id, 20));
+    expect(q.size).toBe(3);
+    expect(q.stats.dropped).toBe(0);
+    expect(q.stats.coalesced).toBe(0);
+    release();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(sent.reduce((s, c) => s + c.samples.length / RATE, 0)).toBe(60);
+  });
 });
 
 describe("Sarvam retry rules", () => {

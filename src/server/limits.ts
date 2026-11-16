@@ -1,8 +1,13 @@
 import { count, eq } from "drizzle-orm";
-import { MAX_MEETING_MIN, MAX_MEETINGS, MAX_PROJECTS, MAX_MEETING_SEC, isExempt } from "@/lib/limits";
+import { MAX_MEETING_MIN, MAX_MEETINGS, MAX_PROJECTS, MAX_MEETING_SEC } from "@/lib/limits";
 import { db, schema } from "./db";
 import { ApiError } from "./http";
+import { closeRoom } from "./livekit";
 import { publish } from "./sse";
+
+/** This account has no project, meeting, or duration cap. Kept on the server so the address is not in the client bundle. */
+const EXEMPT_EMAIL = "anilkumarkondeboina@gmail.com";
+export const isExempt = (email: string | null | undefined) => (email ?? "").trim().toLowerCase() === EXEMPT_EMAIL;
 
 type Meeting = typeof schema.meeting.$inferSelect;
 
@@ -45,5 +50,6 @@ export async function enforceMeetingTime(m: Meeting) {
     .set({ state: "ended", endedAt: new Date(), heldAt: new Date().toISOString().slice(0, 10) })
     .where(eq(schema.meeting.id, m.id));
   publish(m.projectId, "meeting.ended", { meetingId: m.id });
+  await closeRoom(m.id);
   throw new ApiError(409, "ended", `Meeting reached the ${MAX_MEETING_MIN} minute limit`);
 }

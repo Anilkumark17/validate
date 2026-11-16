@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireProject } from "@/server/auth";
 import { launch, startRun } from "@/server/board/generate";
-import { ApiError, handle, parseBody, rateLimit } from "@/server/http";
+import { handle, parseBody, rateLimit } from "@/server/http";
 import { refineInput } from "@/lib/board/schemas";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +13,7 @@ export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   await requireProject(req, id);
   const v = await parseBody(req, refineInput);
-  if (v.dimensions.every((d) => !(v.notes[d] ?? "").trim())) {
-    throw new ApiError(400, "no_context", "Add some detail for at least one selected dimension");
-  }
-  const { run, started } = await startRun(id, "refine", { dimensions: v.dimensions, notes: v.notes }, v.idempotencyKey);
+  const { run, started } = await startRun(id, "refine", { dimensions: v.dimensions, notes: v.notes, learning: v.learning, answers: v.answers }, v.idempotencyKey);
   if (started) launch(run.id);
   return NextResponse.json({ run, started }, { status: 202 });
 });

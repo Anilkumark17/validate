@@ -13,6 +13,7 @@ import { refreshBoard, type AssumptionDetail, type BoardAssumption, type BoardSt
 import { ALLOWED } from "@/lib/board/transitions";
 import { RiskBadge, StatusBadge } from "./badges";
 import { EvidenceForm } from "./evidence-form";
+import { UpdateThinking } from "./update-thinking";
 
 const INTERP_STYLE = { supports: "text-positive", contradicts: "text-destructive", inconclusive: "text-muted-foreground" } as const;
 
@@ -74,6 +75,7 @@ function DetailsTab({ projectId, a, onMove }: { projectId: string; a: BoardAssum
             </ul>
           </div>
         )}
+        <UpdateThinking projectId={projectId} assumption={a} />
         <div className="flex flex-wrap items-end gap-2 border-t pt-4">
           <div>
             <Label htmlFor="as-move">Move to</Label>

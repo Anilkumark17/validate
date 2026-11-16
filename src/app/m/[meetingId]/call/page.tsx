@@ -10,13 +10,14 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Brand, PageState, ThemeToggle } from "@/components/app-shell";
 import { CallQuestions } from "@/components/call-questions";
+import { TranscriptExtract } from "@/components/meeting-extract";
 import type { Guide } from "@/components/questions/guide-view";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/form";
 import { api, ApiRequestError, type MeetingDetail, type Segment } from "@/lib/api";
 import { GUEST_NAME_KEY } from "@/lib/guest";
 import { useMe } from "@/lib/auth";
-import { MAX_MEETING_MIN, MAX_MEETING_SEC, isExempt } from "@/lib/limits";
+import { MAX_MEETING_MIN, MAX_MEETING_SEC } from "@/lib/limits";
 import { DEFAULT_ENDPOINTER, Endpointer } from "@/lib/audio/endpointer";
 import { Window } from "@/lib/audio/metrics";
 import { UploadQueue } from "@/lib/audio/upload-queue";
@@ -170,6 +171,7 @@ function Transcriber({
           }
           const body = (await r.json().catch(() => null)) as { error?: { code?: string; message?: string; fatal?: boolean } } | null;
           const err = body?.error;
+          if (err?.code === "not_live") return { ok: false, retryable: true };
           if (err?.code === "stt_unavailable") {
             if (err.fatal) {
               fallback(err.message?.includes("not configured") ? "Sarvam is not configured, using browser speech recognition" : "Sarvam rejected the request, using browser speech recognition");
@@ -272,8 +274,9 @@ function Transcriber({
               if (j.segment) segRef.current(j.segment);
               return;
             }
-            setError((await r.json().catch(() => null))?.error?.message ?? `HTTP ${r.status}`);
-            if (r.status < 500 && r.status !== 429) return;
+            const body = (await r.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+            setError(body?.error?.message ?? `HTTP ${r.status}`);
+            if (r.status < 500 && r.status !== 429 && body?.error?.code !== "not_live") return;
           } catch (e) {
             setError((e as Error).message);
           }
@@ -362,16 +365,22 @@ function Transcriber({
 }
 
 /** Receives finalized segments the server broadcast over the LiveKit data channel (a WebSocket). */
-function TranscriptListener({ onSegment, onResync, onInterim }: { onSegment: (s: Segment) => void; onResync: () => void; onInterim: (id: string, i: Interim | null) => void }) {
+function TranscriptListener({ onResync, onInterim }: { onResync: () => void; onInterim: (id: string, i: Interim | null) => void }) {
   const room = useRoomContext();
-  const segRef = useRef(onSegment);
-  segRef.current = onSegment;
   const syncRef = useRef(onResync);
   syncRef.current = onResync;
   const interimRef = useRef(onInterim);
   interimRef.current = onInterim;
   useEffect(() => {
     const dec = new TextDecoder();
+    let timer = 0;
+    const schedule = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        syncRef.current();
+      }, 400);
+    };
     const onData = (payload: Uint8Array, _p?: unknown, _k?: unknown, topic?: string) => {
       if (topic === "interim") {
         try {
@@ -381,12 +390,13 @@ function TranscriptListener({ onSegment, onResync, onInterim }: { onSegment: (s:
         return;
       }
       if (topic !== "transcript") return;
+      // The payload is a wake-up. The line on screen comes from Postgres, so a peer cannot invent one.
       try {
-        const m = JSON.parse(dec.decode(payload)) as Segment & { capturedAt?: number | null };
+        const m = JSON.parse(dec.decode(payload)) as { capturedAt?: number | null; speaker?: string };
         if (m.capturedAt) lat.e2e.add(Date.now() - m.capturedAt);
-        interimRef.current(m.speaker ?? "", null);
-        segRef.current({ id: m.id, meetingId: m.meetingId, idx: m.idx, speaker: m.speaker, text: m.text, startSec: m.startSec });
+        if (m.speaker) interimRef.current(m.speaker, null);
       } catch {}
+      schedule();
     };
     const resync = () => syncRef.current();
     const visible = () => document.visibilityState === "visible" && resync();
@@ -397,6 +407,7 @@ function TranscriptListener({ onSegment, onResync, onInterim }: { onSegment: (s:
       room.off(RoomEvent.DataReceived, onData);
       room.off(RoomEvent.Reconnected, resync);
       document.removeEventListener("visibilitychange", visible);
+      if (timer) window.clearTimeout(timer);
     };
   }, [room]);
   return null;
@@ -429,7 +440,7 @@ function RoomBridge({ onState }: { onState: (s: ConnectionState) => void }) {
 
 const Row = memo(function Row({ s }: { s: Segment }) {
   return (
-    <div className="text-sm">
+    <div id={`seg-${s.id}`} className="text-sm">
       <div className="text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{s.speaker}</span> · {fmtTime(s.startSec)}
       </div>
@@ -442,6 +453,13 @@ function TranscriptPanel({ segments, interim = [] }: { segments: Segment[]; inte
   const endRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   useEffect(() => {
+    const id = window.location.hash.slice(1);
+    const target = id ? document.getElementById(id) : null;
+    if (target) {
+      target.scrollIntoView({ block: "center" });
+      nearBottom.current = false;
+      return;
+    }
     if (nearBottom.current) endRef.current?.scrollIntoView({ block: "end" });
   }, [segments.length, interim.length]);
   return (
@@ -569,6 +587,7 @@ export default function CallPage() {
 
   const connected = useProjectEvents(projectId, (ev, d) => {
     if (d.meetingId !== meetingId) return;
+    if (ev === "meeting.updated") void qc.invalidateQueries({ queryKey: ["meeting", meetingId] });
     if (ev === "meeting.ended") leave();
   });
 
@@ -579,7 +598,7 @@ export default function CallPage() {
   });
 
   // Mirror of the server limit: the host's browser ends the call at the time limit. The server enforces it too.
-  const limitHit = !!startedAt && !isExempt(me.data?.email) && now - startedAt >= MAX_MEETING_SEC * 1000;
+  const limitHit = !!startedAt && !me.data?.exempt && now - startedAt >= MAX_MEETING_SEC * 1000;
   const autoEnded = useRef(false);
   useEffect(() => {
     if (limitHit && me.data && !autoEnded.current) {
@@ -607,7 +626,8 @@ export default function CallPage() {
             <ThemeToggle />
           </div>
         </header>
-        <div className="grid min-h-0 flex-1">
+        <div className={`grid min-h-0 flex-1 ${me.data ? "lg:grid-cols-[1.1fr_0.9fr]" : ""}`}>
+          {me.data && <TranscriptExtract meeting={data.meeting} />}
           <TranscriptPanel segments={data.segments} />
         </div>
       </div>
@@ -680,7 +700,7 @@ export default function CallPage() {
               <VideoConference />
               <RoomAudioRenderer />
               <Transcriber meetingId={meetingId} name={name} startedAt={startedAt} onSegment={applySegment} />
-              <TranscriptListener onSegment={applySegment} onResync={resync} onInterim={onInterim} />
+              <TranscriptListener onResync={resync} onInterim={onInterim} />
               {debug && <DebugOverlay />}
             </LiveKitRoom>
           )}

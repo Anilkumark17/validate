@@ -38,3 +38,14 @@ export async function broadcastSegment(msg: Omit<TranscriptMessage, "sentAt">): 
     return { ok: false, ms: Date.now() - started };
   }
 }
+
+/** Kicks everyone still in the room. An already-issued token cannot rejoin a deleted room. */
+export async function closeRoom(meetingId: string): Promise<void> {
+  const client = rooms();
+  if (!client) return;
+  try {
+    await client.deleteRoom(meetingId);
+  } catch (e) {
+    console.error("[livekit] close room failed", e instanceof Error ? e.message : e);
+  }
+}

@@ -8,9 +8,9 @@ export function Avatars() {
   const [open, setOpen] = useState<string>(AVATARS[0]!.id);
   return (
     <section aria-labelledby="av-h" className="mx-auto max-w-[1600px] px-[var(--margin)] py-24 md:py-32">
-      <p className="lp-soft text-[length:var(--step-small)]" data-reveal>Meet your AI customer avatars</p>
+      <p className="lp-soft text-[length:var(--step-small)]" data-reveal>Meet your AI customer profiles</p>
       <h2 id="av-h" className="lp-serif mt-3 max-w-[13em] text-[length:var(--step-head)]" data-reveal>
-        Not generic personas. Customer profiles built from real conversations.
+        Not fictional personas. Customer profiles grounded in interview evidence.
       </h2>
 
       <ul className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-[length:var(--step-small)]" aria-label="Legend" data-reveal>
@@ -25,7 +25,7 @@ export function Avatars() {
       </div>
 
       <div className="mt-12 flex flex-wrap items-center gap-5" data-reveal>
-        <Link href="/login?signup=1" className="lp-btn">Talk to an AI Customer</Link>
+        <Link href="/login?signup=1" className="lp-btn">Question an AI customer</Link>
         <p className="lp-soft text-[length:var(--step-small)]">Sample profiles. Names and quotes are illustrative.</p>
       </div>
     </section>
